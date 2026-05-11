@@ -12,6 +12,9 @@
 #include "ui/editor/PythonCodeTemplates.h"
 #include "ui/inspector/NodeInspector.h"
 #include "ui/output/OutputPanel.h"
+#include "ui/theme/ThemeManager.h"
+#include "ui/widgets/CommandBar.h"
+#include "ui/widgets/IconSquareButton.h"
 #include "ui/workspace/WorkspaceExplorer.h"
 
 #include <QAction>
@@ -32,7 +35,6 @@
 #include <QStackedLayout>
 #include <QStatusBar>
 #include <QTimer>
-#include <QToolBar>
 #include <QVBoxLayout>
 
 namespace vws {
@@ -42,71 +44,63 @@ MainWindow::MainWindow(AppContext& appContext, QWidget* parent)
     , m_appContext(appContext)
 {
     setWindowTitle("Visual Workflow Studio");
+    setMinimumSize(1280, 760);
+    resize(1440, 900);
     buildActions();
     buildLayout();
+    applyInitialTheme();
     updateCanvasOverlay();
 }
 
 void MainWindow::buildActions()
 {
-    // 菜单动作只负责收集用户输入，再转给 application service。
-    // 这样 UI 不直接知道 JSON 怎么存、模板怎么导入，业务规则仍然留在 application 层。
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
     auto* workflowMenu = menuBar()->addMenu(tr("&Workflow"));
+    auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
-    auto* newWorkspaceAction = fileMenu->addAction(tr("New Workspace"));
-    auto* openWorkspaceAction = fileMenu->addAction(tr("Open Workspace"));
-    auto* selectPythonAction = fileMenu->addAction(tr("Select Python Interpreter"));
+    m_newWorkspaceAction = fileMenu->addAction(tr("New Workspace"));
+    m_openWorkspaceAction = fileMenu->addAction(tr("Open Workspace"));
+    m_selectPythonAction = fileMenu->addAction(tr("Select Python Interpreter"));
     fileMenu->addSeparator();
     auto* exitAction = fileMenu->addAction(tr("Exit"));
 
-    auto* newWorkflowAction = workflowMenu->addAction(tr("New Workflow"));
+    m_newWorkflowAction = workflowMenu->addAction(tr("New Workflow"));
     auto* loadWorkflowAction = workflowMenu->addAction(tr("Load Workflow"));
-    auto* saveWorkflowAction = workflowMenu->addAction(tr("Save Workflow"));
+    m_saveWorkflowAction = workflowMenu->addAction(tr("Save Workflow"));
     workflowMenu->addSeparator();
-    auto* saveTemplateAction = workflowMenu->addAction(tr("Save Selected Node As Template"));
+    m_saveTemplateAction = workflowMenu->addAction(tr("Save Selected Node As Template"));
     auto* addNodeFromTemplateAction = workflowMenu->addAction(tr("Add Node From Template"));
-    auto* connectNodesAction = workflowMenu->addAction(tr("Connect Selected Nodes"));
-    auto* importTemplateAction = workflowMenu->addAction(tr("Import Node Template"));
+    m_connectNodesAction = workflowMenu->addAction(tr("Connect Selected Nodes"));
+    m_importTemplateAction = workflowMenu->addAction(tr("Import Node Template"));
     workflowMenu->addSeparator();
-    auto* runAction = workflowMenu->addAction(tr("Run Workflow"));
-    auto* cancelRunAction = workflowMenu->addAction(tr("Cancel Run"));
+    m_runAction = workflowMenu->addAction(tr("Run Workflow"));
+    m_cancelRunAction = workflowMenu->addAction(tr("Cancel Run"));
 
-    auto* toolbar = addToolBar(tr("Main"));
-    toolbar->setMovable(false);
-    toolbar->addAction(newWorkspaceAction);
-    toolbar->addAction(openWorkspaceAction);
-    toolbar->addAction(selectPythonAction);
-    toolbar->addSeparator();
-    toolbar->addAction(newWorkflowAction);
-    toolbar->addAction(saveWorkflowAction);
-    toolbar->addSeparator();
-    toolbar->addAction(saveTemplateAction);
-    toolbar->addAction(connectNodesAction);
-    toolbar->addAction(importTemplateAction);
-    toolbar->addSeparator();
-    toolbar->addAction(runAction);
-    toolbar->addAction(cancelRunAction);
+    m_toggleThemeAction = viewMenu->addAction(tr("Toggle Light / Dark Theme"));
 
-    connect(newWorkspaceAction, &QAction::triggered, this, &MainWindow::createWorkspace);
-    connect(openWorkspaceAction, &QAction::triggered, this, &MainWindow::openWorkspace);
-    connect(selectPythonAction, &QAction::triggered, this, &MainWindow::selectPythonInterpreter);
-    connect(newWorkflowAction, &QAction::triggered, this, &MainWindow::createWorkflow);
+    connect(m_newWorkspaceAction, &QAction::triggered, this, &MainWindow::createWorkspace);
+    connect(m_openWorkspaceAction, &QAction::triggered, this, &MainWindow::openWorkspace);
+    connect(m_selectPythonAction, &QAction::triggered, this, &MainWindow::selectPythonInterpreter);
+    connect(m_newWorkflowAction, &QAction::triggered, this, &MainWindow::createWorkflow);
     connect(loadWorkflowAction, &QAction::triggered, this, &MainWindow::loadWorkflow);
-    connect(saveWorkflowAction, &QAction::triggered, this, &MainWindow::saveWorkflow);
-    connect(saveTemplateAction, &QAction::triggered, this, &MainWindow::saveSelectedNodeAsTemplate);
+    connect(m_saveWorkflowAction, &QAction::triggered, this, &MainWindow::saveWorkflow);
+    connect(m_saveTemplateAction, &QAction::triggered, this, &MainWindow::saveSelectedNodeAsTemplate);
     connect(addNodeFromTemplateAction, &QAction::triggered, this, &MainWindow::addNodeFromTemplate);
-    connect(connectNodesAction, &QAction::triggered, this, &MainWindow::connectSelectedNodes);
-    connect(importTemplateAction, &QAction::triggered, this, &MainWindow::importNodeTemplate);
-    connect(runAction, &QAction::triggered, this, &MainWindow::runCurrentWorkflow);
-    connect(cancelRunAction, &QAction::triggered, this, &MainWindow::cancelCurrentWorkflowRun);
+    connect(m_connectNodesAction, &QAction::triggered, this, &MainWindow::connectSelectedNodes);
+    connect(m_importTemplateAction, &QAction::triggered, this, &MainWindow::importNodeTemplate);
+    connect(m_runAction, &QAction::triggered, this, &MainWindow::runCurrentWorkflow);
+    connect(m_cancelRunAction, &QAction::triggered, this, &MainWindow::cancelCurrentWorkflowRun);
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
 }
 
 void MainWindow::buildLayout()
 {
-    // 四个主要区域各自是独立控件：
-    // 左：工作区资源树；中：工作流画布；右：节点配置；下：运行输出。
+    // ThemeManager owns the application-level stylesheet and color tokens.
+    m_themeManager = new ui::ThemeManager(this);
+    ui::ThemeManager::setInstance(m_themeManager);
+    connect(m_toggleThemeAction, &QAction::triggered, m_themeManager, &ui::ThemeManager::toggleTheme);
+
+    // Main panels are independent widgets; MainWindow only wires them together.
     m_workspaceExplorer = new ui::WorkspaceExplorer(this);
     m_workflowCanvas = new ui::WorkflowCanvas(this);
     m_nodeInspector = new ui::NodeInspector(this);
@@ -114,12 +108,14 @@ void MainWindow::buildLayout()
     m_canvasOverlay = buildCanvasOverlay();
 
     auto* canvasHost = new QWidget(this);
+    canvasHost->setObjectName(QStringLiteral("canvasHost"));
     auto* canvasStack = new QStackedLayout(canvasHost);
     canvasStack->setStackingMode(QStackedLayout::StackAll);
     canvasStack->setContentsMargins(0, 0, 0, 0);
     canvasStack->addWidget(m_workflowCanvas);
     canvasStack->addWidget(m_canvasOverlay);
 
+    // UI widgets emit intent; application services and the execution engine do the work.
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeSelected, this, [this](const domain::Node& node) {
         m_nodeInspector->displayNode(node);
         updateSelectedNodeStatus(node);
@@ -152,45 +148,113 @@ void MainWindow::buildLayout()
             m_outputPanel->recordThreadTrace(runId, nodeId, phase, threadId, threadName);
         });
 
+    // Canvas items are painted manually, so they refresh when the theme changes.
+    connect(m_themeManager, &ui::ThemeManager::themeChanged, this, [this](ui::AppTheme) {
+        if (m_workflowCanvas != nullptr) {
+            m_workflowCanvas->refreshTheme();
+        }
+        updateCanvasOverlay();
+    });
+
+    // Compact icon command bar replaces the earlier text-heavy toolbar.
+    buildCommandBar();
+
+    // Splitters keep the workspace browser, canvas, inspector, and output panel resizable.
     auto* horizontalSplitter = new QSplitter(Qt::Horizontal, this);
+    horizontalSplitter->setObjectName(QStringLiteral("mainHorizontalSplitter"));
     horizontalSplitter->addWidget(m_workspaceExplorer);
     horizontalSplitter->addWidget(canvasHost);
     horizontalSplitter->addWidget(m_nodeInspector);
     horizontalSplitter->setStretchFactor(0, 0);
     horizontalSplitter->setStretchFactor(1, 1);
     horizontalSplitter->setStretchFactor(2, 0);
-    horizontalSplitter->setSizes({260, 880, 320});
+    horizontalSplitter->setSizes({280, 880, 340});
 
     auto* verticalSplitter = new QSplitter(Qt::Vertical, this);
+    verticalSplitter->setObjectName(QStringLiteral("mainVerticalSplitter"));
     verticalSplitter->addWidget(horizontalSplitter);
     verticalSplitter->addWidget(m_outputPanel);
     verticalSplitter->setStretchFactor(0, 1);
     verticalSplitter->setStretchFactor(1, 0);
-    verticalSplitter->setSizes({650, 250});
+    verticalSplitter->setSizes({650, 300});
 
-    setCentralWidget(verticalSplitter);
+    auto* centralWrapper = new QWidget(this);
+    centralWrapper->setObjectName(QStringLiteral("centralWrapper"));
+    auto* centralLayout = new QVBoxLayout(centralWrapper);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_commandBar);
+    centralLayout->addWidget(verticalSplitter, 1);
+    setCentralWidget(centralWrapper);
 
+    // Status bar shows selected-node runtime info and the workspace Python interpreter.
     m_timeoutStatusLabel = new QLabel(tr("Timeout: -"), this);
+    m_timeoutStatusLabel->setObjectName("timeoutStatus");
     m_pythonStatusLabel = new QLabel(tr("Python: not selected"), this);
+    m_pythonStatusLabel->setObjectName("pythonStatus");
     statusBar()->addPermanentWidget(m_timeoutStatusLabel);
     statusBar()->addPermanentWidget(m_pythonStatusLabel, 1);
+}
+
+void MainWindow::buildCommandBar()
+{
+    m_commandBar = new ui::CommandBar(this);
+    m_commandBar->setWorkspaceInfo(tr("Visual Workflow Studio"));
+
+    m_commandBar->addActionButton(QIcon(":/icons/workspace-new.svg"),
+        m_newWorkspaceAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addActionButton(QIcon(":/icons/workspace-open.svg"),
+        m_openWorkspaceAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addActionButton(QIcon(":/icons/python.svg"),
+        m_selectPythonAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addSeparator();
+    m_commandBar->addActionButton(QIcon(":/icons/workflow-new.svg"),
+        m_newWorkflowAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addActionButton(QIcon(":/icons/save.svg"),
+        m_saveWorkflowAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addSeparator();
+    m_commandBar->addActionButton(QIcon(":/icons/template-save.svg"),
+        m_saveTemplateAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addActionButton(QIcon(":/icons/link.svg"),
+        m_connectNodesAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addActionButton(QIcon(":/icons/import.svg"),
+        m_importTemplateAction, ui::IconSquareButton::Role::Secondary);
+    m_commandBar->addSeparator();
+    m_commandBar->addActionButton(QIcon(":/icons/run.svg"),
+        m_runAction, ui::IconSquareButton::Role::Primary);
+    m_commandBar->addActionButton(QIcon(":/icons/stop.svg"),
+        m_cancelRunAction, ui::IconSquareButton::Role::Danger);
+
+    auto* themeButton = m_commandBar->addButton(
+        QIcon(":/icons/theme.svg"), tr("Toggle Light / Dark Theme"),
+        ui::IconSquareButton::Role::Ghost);
+    connect(themeButton, &QPushButton::clicked, m_themeManager, &ui::ThemeManager::toggleTheme);
+}
+
+void MainWindow::applyInitialTheme()
+{
+    m_themeManager->applyTheme(ui::AppTheme::Light);
 }
 
 QWidget* MainWindow::buildCanvasOverlay()
 {
     auto* overlay = new QWidget(this);
+    overlay->setObjectName("canvasOverlay");
     overlay->setAutoFillBackground(true);
-    overlay->setStyleSheet(
-        "QWidget { background: rgba(210, 210, 210, 190); }"
-        "QLabel { color: white; font-size: 20px; font-weight: 600; background: transparent; }"
-        "QPushButton { padding: 8px 18px; background: #f8fafc; color: #111827; border: 1px solid #cbd5e1; border-radius: 4px; }"
-        "QPushButton:hover { background: #e2e8f0; }");
+    // Background color will be set by applyInitialTheme() and updated on theme change.
+    // QSS for this widget is not used; we set the palette directly for overlay transparency.
 
     m_canvasOverlayTitle = new QLabel(overlay);
+    m_canvasOverlayTitle->setObjectName("canvasOverlayTitle");
     m_canvasOverlayTitle->setAlignment(Qt::AlignCenter);
 
     m_overlayPrimaryButton = new QPushButton(overlay);
+    m_overlayPrimaryButton->setObjectName("overlayPrimaryButton");
+    m_overlayPrimaryButton->setProperty("buttonRole", "primary");
+
     m_overlaySecondaryButton = new QPushButton(overlay);
+    m_overlaySecondaryButton->setObjectName("overlaySecondaryButton");
+    m_overlaySecondaryButton->setProperty("buttonRole", "secondary");
 
     auto* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch(1);
@@ -214,6 +278,14 @@ void MainWindow::updateCanvasOverlay()
         return;
     }
 
+    // Update overlay background from theme (QSS handles the rest)
+    if (m_themeManager != nullptr) {
+        const auto overlayBg = m_themeManager->color("overlay-bg");
+        m_canvasOverlay->setStyleSheet(
+            QStringLiteral("QWidget#canvasOverlay { background: %1; }")
+                .arg(overlayBg.name(QColor::HexArgb)));
+    }
+
     disconnect(m_overlayPrimaryButton, nullptr, this, nullptr);
     disconnect(m_overlaySecondaryButton, nullptr, this, nullptr);
 
@@ -223,9 +295,17 @@ void MainWindow::updateCanvasOverlay()
         m_overlaySecondaryButton->setText(tr("Open Workspace"));
         connect(m_overlayPrimaryButton, &QPushButton::clicked, this, &MainWindow::createWorkspace);
         connect(m_overlaySecondaryButton, &QPushButton::clicked, this, &MainWindow::openWorkspace);
+        if (m_commandBar != nullptr) {
+            m_commandBar->setWorkspaceInfo(tr("Visual Workflow Studio"));
+            m_commandBar->setWorkflowInfo(tr("No workspace"));
+        }
         m_canvasOverlay->show();
         m_canvasOverlay->raise();
         return;
+    }
+
+    if (m_commandBar != nullptr) {
+        m_commandBar->setWorkspaceInfo(m_currentWorkspace.name);
     }
 
     if (m_currentWorkflow.workflowId.isEmpty()) {
@@ -234,9 +314,16 @@ void MainWindow::updateCanvasOverlay()
         m_overlaySecondaryButton->setText(tr("Open Workflow"));
         connect(m_overlayPrimaryButton, &QPushButton::clicked, this, &MainWindow::createWorkflow);
         connect(m_overlaySecondaryButton, &QPushButton::clicked, this, &MainWindow::loadWorkflow);
+        if (m_commandBar != nullptr) {
+            m_commandBar->setWorkflowInfo(tr("No workflow"));
+        }
         m_canvasOverlay->show();
         m_canvasOverlay->raise();
         return;
+    }
+
+    if (m_commandBar != nullptr) {
+        m_commandBar->setWorkflowInfo(m_currentWorkflow.name);
     }
 
     m_canvasOverlay->hide();
@@ -629,14 +716,10 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
         this);
     dialog->setAttribute(Qt::WA_DeleteOnClose, true);
 
-    // 用 modeless 窗口而不是 exec()。exec() 会在 QGraphicsItem 的双击事件尚未返回时
-    // 开启嵌套事件循环；如果用户在这个嵌套循环里点 Save，我们会反过来更新刚才被
-    // 双击的图元，容易触发 Qt 图元事件栈重入。Starter 节点连续创建/保存时的闪退
-    // 就是这个时序问题暴露出来的。
+    // Keep the editor modeless. Saving is deferred below so Qt does not mutate the canvas while a graphics-item double-click event is still unwinding.
     connect(dialog, &ui::PythonNodeEditorDialog::nodeSaved, this,
         [this, nodeId = node.nodeId](const QString& name, const QString& description, const QString& code, const QJsonObject& configPatch) {
-        // Save 按钮/关闭确认框本身也在处理 UI 事件。把真正的 Canvas 更新推迟到
-        // 下一轮事件循环，可以避免在按钮事件或关闭事件栈里直接修改 QGraphicsScene。
+        // The save button/close prompt is also inside a UI event. Defer canvas mutation to the next event turn.
         QTimer::singleShot(0, this, [this, nodeId, name, description, code, configPatch]() {
             m_currentWorkflow = m_workflowCanvas->workflow();
             QString errorMessage;

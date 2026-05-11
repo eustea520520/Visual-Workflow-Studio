@@ -16,8 +16,7 @@ namespace vws::ui {
 
 class PythonCodeEditor;
 
-// Python 节点编辑 Dialog。
-// 它编辑节点标题、描述和 config.code，保存结果交给 MainWindow 同步回 Workflow。
+// Dialog for editing node metadata, optional Agent settings, and Python code.
 class PythonNodeEditorDialog final : public QDialog {
     Q_OBJECT
 

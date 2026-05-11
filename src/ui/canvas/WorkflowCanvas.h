@@ -45,6 +45,7 @@ public:
     void clearWorkflow();
     bool updateNode(const domain::Node& node);
     void setNodeStatus(const QString& nodeId, const QString& status);
+    void refreshTheme();
 
 signals:
     void nodeSelected(const domain::Node& node);

@@ -3,6 +3,7 @@
 #include "ui/canvas/ArrowHeadBuilder.h"
 #include "ui/canvas/EdgeRouter.h"
 #include "ui/canvas/NodeGraphicsItem.h"
+#include "ui/theme/ThemeManager.h"
 
 #include <QGraphicsSceneHoverEvent>
 #include <QPainter>
@@ -137,13 +138,18 @@ void EdgeGraphicsItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event)
 
 QPen EdgeGraphicsItem::currentPen() const
 {
+    auto* tm = ThemeManager::instance();
+
     if (isSelected()) {
-        return QPen(QColor("#2563eb"), 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        return QPen(tm ? tm->color("edge-selected") : QColor("#2563eb"),
+                    3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     }
     if (m_hovered) {
-        return QPen(QColor("#334155"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        return QPen(tm ? tm->color("edge-hover") : QColor("#334155"),
+                    3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     }
-    return QPen(QColor("#64748b"), 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    return QPen(tm ? tm->color("edge-normal") : QColor("#64748b"),
+                2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
 }
 
 qreal EdgeGraphicsItem::parallelOffset() const

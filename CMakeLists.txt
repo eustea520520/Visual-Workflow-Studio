@@ -70,11 +70,14 @@ set(UI_SOURCES
     src/ui/editor/LineNumberArea.h src/ui/editor/LineNumberArea.cpp
     src/ui/editor/PythonCodeTemplates.h src/ui/editor/PythonCodeTemplates.cpp
     src/ui/editor/PythonCodeEditor.h src/ui/editor/PythonCodeEditor.cpp
+    src/ui/editor/PythonNodeEditorDialog.h src/ui/editor/PythonNodeEditorDialog.cpp
     src/ui/editor/PythonSyntaxHighlighter.h src/ui/editor/PythonSyntaxHighlighter.cpp
     src/ui/editor/PythonCompleter.h src/ui/editor/PythonCompleter.cpp
-    src/ui/editor/PythonNodeEditorDialog.h src/ui/editor/PythonNodeEditorDialog.cpp
     src/ui/inspector/NodeInspector.h src/ui/inspector/NodeInspector.cpp
     src/ui/output/OutputPanel.h src/ui/output/OutputPanel.cpp
+    src/ui/theme/ThemeManager.h src/ui/theme/ThemeManager.cpp
+    src/ui/widgets/IconSquareButton.h src/ui/widgets/IconSquareButton.cpp
+    src/ui/widgets/CommandBar.h src/ui/widgets/CommandBar.cpp
 )
 
 set(APP_SOURCES
@@ -91,6 +94,7 @@ qt_add_executable(visual-workflow-studio
     ${INFRA_SOURCES}
     ${WORKER_SOURCES}
     ${UI_SOURCES}
+    resources/resources.qrc
 )
 
 target_include_directories(visual-workflow-studio PRIVATE app src)
@@ -173,6 +177,7 @@ qt_add_executable(test_canvas_items
     src/ui/canvas/EdgePathBuilder.h src/ui/canvas/EdgePathBuilder.cpp
     src/ui/canvas/ArrowHeadBuilder.h src/ui/canvas/ArrowHeadBuilder.cpp
     src/ui/editor/PythonCodeTemplates.h src/ui/editor/PythonCodeTemplates.cpp
+    src/ui/theme/ThemeManager.h src/ui/theme/ThemeManager.cpp
 )
 target_include_directories(test_canvas_items PRIVATE src)
 target_link_libraries(test_canvas_items PRIVATE Qt6::Widgets)
@@ -187,6 +192,7 @@ qt_add_executable(test_output_panel
     src/ui/editor/PythonCodeEditor.h src/ui/editor/PythonCodeEditor.cpp
     src/ui/editor/PythonSyntaxHighlighter.h src/ui/editor/PythonSyntaxHighlighter.cpp
     src/ui/editor/PythonCompleter.h src/ui/editor/PythonCompleter.cpp
+    src/ui/theme/ThemeManager.h src/ui/theme/ThemeManager.cpp
     src/execution/ExecutionEngine.h
     src/execution/NodeExecutionResult.h
 )
@@ -218,8 +224,10 @@ qt_add_executable(test_python_editor
     src/ui/editor/LineNumberArea.h src/ui/editor/LineNumberArea.cpp
     src/ui/editor/PythonCodeTemplates.h src/ui/editor/PythonCodeTemplates.cpp
     src/ui/editor/PythonCodeEditor.h src/ui/editor/PythonCodeEditor.cpp
+    src/ui/editor/PythonNodeEditorDialog.h src/ui/editor/PythonNodeEditorDialog.cpp
     src/ui/editor/PythonSyntaxHighlighter.h src/ui/editor/PythonSyntaxHighlighter.cpp
     src/ui/editor/PythonCompleter.h src/ui/editor/PythonCompleter.cpp
+    src/ui/theme/ThemeManager.h src/ui/theme/ThemeManager.cpp
     ${INFRA_SOURCES}
 )
 target_include_directories(test_python_editor PRIVATE src)

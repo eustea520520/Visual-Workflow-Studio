@@ -10,10 +10,8 @@ class LineNumberArea;
 class PythonCompleter;
 class PythonSyntaxHighlighter;
 
-// 轻量 Python 代码编辑器。
-//
-// 负责文本编辑体验：行号、当前行高亮、Tab 四空格、多行缩进、自动缩进和基础补全。
-// 它不执行代码，也不直接保存 Workflow。
+// Lightweight Python editor with line numbers, highlighting, indentation, and completion.
+// It edits text only; workflow persistence and execution live in higher layers.
 class PythonCodeEditor final : public QPlainTextEdit {
     Q_OBJECT
 
@@ -31,10 +29,12 @@ signals:
     void cursorPositionInfoChanged(int line, int column);
 
 protected:
+    void changeEvent(QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    void applyEditorFont();
     void updateLineNumberAreaWidth();
     void updateLineNumberArea(const QRect& rect, int dy);
     void highlightCurrentLine();
@@ -53,6 +53,7 @@ private:
     PythonCompleter* m_completer = nullptr;
     PythonSyntaxHighlighter* m_highlighter = nullptr;
     int m_tabSpaces = 4;
+    bool m_applyingEditorFont = false;
 };
 
 } // namespace vws::ui

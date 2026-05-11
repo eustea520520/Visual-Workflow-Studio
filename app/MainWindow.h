@@ -3,6 +3,7 @@
 #include "domain/Workflow.h"
 #include "domain/Workspace.h"
 
+#include <QAction>
 #include <QMainWindow>
 
 class QLabel;
@@ -14,14 +15,14 @@ namespace vws {
 class AppContext;
 
 namespace ui {
+class CommandBar;
 class NodeInspector;
 class OutputPanel;
+class ThemeManager;
 class WorkflowCanvas;
 class WorkspaceExplorer;
 }
 
-// MainWindow 是主窗口壳子，只负责菜单、工具栏和主布局。
-// 具体面板拆到 src/ui/*，避免 MainWindow 变成几千行的“万能类”。
 class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(AppContext& appContext, QWidget* parent = nullptr);
@@ -29,8 +30,10 @@ public:
 private:
     void buildActions();
     void buildLayout();
+    void buildCommandBar();
     QWidget* buildCanvasOverlay();
     void updateCanvasOverlay();
+    void applyInitialTheme();
     void createWorkspace();
     void openWorkspace();
     void selectPythonInterpreter();
@@ -55,6 +58,8 @@ private:
     AppContext& m_appContext;
     domain::Workspace m_currentWorkspace;
     domain::Workflow m_currentWorkflow;
+    ui::ThemeManager* m_themeManager = nullptr;
+    ui::CommandBar* m_commandBar = nullptr;
     ui::WorkspaceExplorer* m_workspaceExplorer = nullptr;
     ui::WorkflowCanvas* m_workflowCanvas = nullptr;
     ui::NodeInspector* m_nodeInspector = nullptr;
@@ -65,6 +70,17 @@ private:
     QPushButton* m_overlaySecondaryButton = nullptr;
     QLabel* m_timeoutStatusLabel = nullptr;
     QLabel* m_pythonStatusLabel = nullptr;
+    QAction* m_newWorkspaceAction = nullptr;
+    QAction* m_openWorkspaceAction = nullptr;
+    QAction* m_selectPythonAction = nullptr;
+    QAction* m_newWorkflowAction = nullptr;
+    QAction* m_saveWorkflowAction = nullptr;
+    QAction* m_saveTemplateAction = nullptr;
+    QAction* m_connectNodesAction = nullptr;
+    QAction* m_importTemplateAction = nullptr;
+    QAction* m_runAction = nullptr;
+    QAction* m_cancelRunAction = nullptr;
+    QAction* m_toggleThemeAction = nullptr;
     bool m_workflowRunning = false;
 };
 

@@ -1,5 +1,6 @@
 #include "ui/workspace/WorkspaceExplorer.h"
 
+#include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
 #include <QTreeWidget>
@@ -12,6 +13,8 @@ namespace vws::ui {
 WorkspaceExplorer::WorkspaceExplorer(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("workspaceExplorer"));
+    setProperty("panel", true);
     buildUi();
 }
 
@@ -38,8 +41,15 @@ void WorkspaceExplorer::buildUi()
     m_workspaceLabel->setObjectName("panelTitle");
 
     m_tree = new QTreeWidget(this);
+    m_tree->setObjectName(QStringLiteral("workspaceTree"));
     m_tree->setHeaderHidden(true);
     m_tree->setRootIsDecorated(true);
+    m_tree->setIndentation(16);
+    m_tree->setAnimated(true);
+    m_tree->setUniformRowHeights(true);
+    m_tree->setExpandsOnDoubleClick(true);
+    m_tree->setFrameShape(QFrame::NoFrame);
+    m_tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_tree->header()->setStretchLastSection(true);
 
     m_workflowsItem = new QTreeWidgetItem(m_tree, {tr("Workflows")});
@@ -60,7 +70,8 @@ void WorkspaceExplorer::buildUi()
     setWorkspaceData({}, {}, {}, {tr("Function Node"), tr("Agent Node")}, {});
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
     layout->addWidget(m_workspaceLabel);
     layout->addWidget(m_tree, 1);
 }

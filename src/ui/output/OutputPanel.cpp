@@ -9,6 +9,8 @@
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QAbstractItemView>
+#include <QFrame>
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -32,6 +34,8 @@ QString compactJson(const QJsonObject& object)
 OutputPanel::OutputPanel(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("outputPanel"));
+    setProperty("panel", true);
     buildUi();
 }
 
@@ -250,48 +254,74 @@ void OutputPanel::buildUi()
     auto* title = new QLabel(tr("Output / Logs / Errors / Artifacts"), this);
     title->setObjectName("panelTitle");
 
+    auto setupTable = [](QTableWidget* table) {
+        table->setAlternatingRowColors(true);
+        table->setShowGrid(false);
+        table->verticalHeader()->setVisible(false);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setSelectionMode(QAbstractItemView::SingleSelection);
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setFrameShape(QFrame::NoFrame);
+        table->setWordWrap(false);
+        table->horizontalHeader()->setStretchLastSection(true);
+    };
+
     m_timelineTable = new QTableWidget(0, 4, this);
+    m_timelineTable->setObjectName(QStringLiteral("timelineTable"));
     m_timelineTable->setHorizontalHeaderLabels({tr("Time"), tr("Scope"), tr("Id"), tr("Status / Message")});
     m_timelineTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_timelineTable->setWordWrap(false);
+    setupTable(m_timelineTable);
 
     m_nodeRunTable = new QTableWidget(0, 6, this);
+    m_nodeRunTable->setObjectName(QStringLiteral("nodeRunTable"));
     m_nodeRunTable->setHorizontalHeaderLabels({tr("Node"), tr("Status"), tr("Updated"), tr("Debug"), tr("Output"), tr("Error")});
     m_nodeRunTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_nodeRunTable->setWordWrap(false);
+    setupTable(m_nodeRunTable);
 
     m_threadTraceTable = new QTableWidget(0, 6, this);
+    m_threadTraceTable->setObjectName(QStringLiteral("threadTraceTable"));
     m_threadTraceTable->setHorizontalHeaderLabels({tr("Time"), tr("Run"), tr("Node"), tr("Phase"), tr("Thread Id"), tr("Thread Name")});
     m_threadTraceTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_threadTraceTable->setWordWrap(false);
+    setupTable(m_threadTraceTable);
 
     m_stdoutView = new QPlainTextEdit(this);
+    m_stdoutView->setObjectName(QStringLiteral("stdoutView"));
     m_stdoutView->setReadOnly(true);
+    m_stdoutView->setProperty("readOnly", true);
     m_stdoutView->setPlaceholderText(tr("application logs will appear here"));
 
     m_debugOutputView = new QPlainTextEdit(this);
     m_debugOutputView->setObjectName("debugOutputView");
     m_debugOutputView->setReadOnly(true);
+    m_debugOutputView->setProperty("readOnly", true);
     m_debugOutputView->setPlaceholderText(tr("Python print() output will appear here"));
 
     m_stderrView = new PythonCodeEditor(this);
+    m_stderrView->setObjectName(QStringLiteral("stderrView"));
     m_stderrView->setReadOnly(true);
+    m_stderrView->setProperty("readOnly", true);
     m_stderrView->setPlaceholderText(tr("stderr will appear here"));
 
     m_tracebackView = new PythonCodeEditor(this);
+    m_tracebackView->setObjectName(QStringLiteral("tracebackView"));
     m_tracebackView->setReadOnly(true);
+    m_tracebackView->setProperty("readOnly", true);
     m_tracebackView->setPlaceholderText(tr("tracebacks will appear here"));
 
     m_outputJsonView = new QPlainTextEdit(this);
+    m_outputJsonView->setObjectName(QStringLiteral("outputJsonView"));
     m_outputJsonView->setReadOnly(true);
+    m_outputJsonView->setProperty("readOnly", true);
     m_outputJsonView->setPlaceholderText(tr("output JSON will appear here"));
 
     m_artifactTable = new QTableWidget(0, 5, this);
+    m_artifactTable->setObjectName(QStringLiteral("artifactTable"));
     m_artifactTable->setHorizontalHeaderLabels({tr("Node"), tr("Type"), tr("Path"), tr("Size"), tr("Preview")});
     m_artifactTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_artifactTable->setWordWrap(false);
+    setupTable(m_artifactTable);
 
     auto* tabs = new QTabWidget(this);
+    tabs->setObjectName(QStringLiteral("outputTabs"));
     tabs->addTab(m_timelineTable, tr("Run Timeline"));
     tabs->addTab(m_nodeRunTable, tr("Node Runs"));
     tabs->addTab(m_threadTraceTable, tr("Thread Trace"));
@@ -303,7 +333,8 @@ void OutputPanel::buildUi()
     tabs->addTab(m_artifactTable, tr("Artifacts"));
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
     layout->addWidget(title);
     layout->addWidget(tabs, 1);
 }

@@ -15,6 +15,8 @@ namespace vws::ui {
 NodeInspector::NodeInspector(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("inspector"));
+    setProperty("panel", true);
     buildUi();
 }
 
@@ -62,7 +64,12 @@ void NodeInspector::buildUi()
     m_pythonEditor->setPlaceholderText(PythonCodeTemplates::defaultFunctionCode());
 
     auto* agentPanel = new QWidget(this);
+    agentPanel->setObjectName(QStringLiteral("agentInspectorPanel"));
     auto* agentLayout = new QFormLayout(agentPanel);
+    agentLayout->setContentsMargins(8, 10, 8, 8);
+    agentLayout->setHorizontalSpacing(10);
+    agentLayout->setVerticalSpacing(8);
+    agentLayout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     m_agentTitleEdit = new QLineEdit(agentPanel);
     m_agentDescriptionEdit = new QLineEdit(agentPanel);
@@ -98,12 +105,15 @@ void NodeInspector::buildUi()
     agentLayout->addRow(tr("Task goal prompt"), m_agentTaskPromptEdit);
 
     m_tabs = new QTabWidget(this);
+    m_tabs->setObjectName(QStringLiteral("inspectorTabs"));
+    m_pythonEditor->setObjectName(QStringLiteral("inspectorCodePreview"));
     m_tabs->addTab(m_pythonEditor, tr("Python"));
     m_tabs->addTab(agentPanel, tr("Agent"));
     m_tabs->setTabEnabled(1, false);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
     layout->addWidget(title);
     layout->addWidget(m_tabs, 1);
 }
@@ -114,6 +124,7 @@ void NodeInspector::setReadOnly(QLineEdit* edit)
         return;
     }
     edit->setReadOnly(true);
+    edit->setProperty("readOnly", true);
     edit->setFocusPolicy(Qt::NoFocus);
 }
 
@@ -123,6 +134,7 @@ void NodeInspector::setReadOnly(QPlainTextEdit* edit)
         return;
     }
     edit->setReadOnly(true);
+    edit->setProperty("readOnly", true);
     edit->setFocusPolicy(Qt::NoFocus);
 }
 

@@ -1,5 +1,6 @@
 #include "ui/editor/PythonCompleter.h"
 
+#include <QAbstractItemView>
 #include <QRegularExpression>
 #include <QStringListModel>
 #include <QSet>
@@ -12,6 +13,7 @@ PythonCompleter::PythonCompleter(QObject* parent)
     setCaseSensitivity(Qt::CaseInsensitive);
     setCompletionMode(QCompleter::PopupCompletion);
     setModelSorting(QCompleter::CaseInsensitivelySortedModel);
+    popup()->setObjectName(QStringLiteral("pythonCompleterPopup"));
     refreshFromCode({});
 }
 

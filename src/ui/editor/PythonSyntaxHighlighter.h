@@ -12,11 +12,14 @@ class PythonSyntaxHighlighter final : public QSyntaxHighlighter {
 public:
     explicit PythonSyntaxHighlighter(QTextDocument* parent = nullptr);
 
+    void refreshTheme();
+
 protected:
     void highlightBlock(const QString& text) override;
 
 private:
     void highlightMultilineString(const QString& text, const QString& delimiter, int state);
+    void buildRules();
 
     struct Rule {
         QRegularExpression pattern;

@@ -3,8 +3,11 @@
 #include "ui/editor/LineNumberArea.h"
 #include "ui/editor/PythonCompleter.h"
 #include "ui/editor/PythonSyntaxHighlighter.h"
+#include "ui/theme/ThemeManager.h"
 
 #include <QAbstractItemView>
+#include <QEvent>
+#include <QFont>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QScrollBar>
@@ -19,6 +22,7 @@ PythonCodeEditor::PythonCodeEditor(QWidget* parent)
     m_completer = new PythonCompleter(this);
     m_highlighter = new PythonSyntaxHighlighter(document());
     m_completer->setWidget(this);
+    setProperty("pythonCodeEditor", true);
 
     connect(this, &QPlainTextEdit::blockCountChanged, this, [this]() { updateLineNumberAreaWidth(); });
     connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect& rect, int dy) { updateLineNumberArea(rect, dy); });
@@ -32,10 +36,47 @@ PythonCodeEditor::PythonCodeEditor(QWidget* parent)
     });
     connect(m_completer, QOverload<const QString&>::of(&QCompleter::activated), this, &PythonCodeEditor::insertCompletion);
 
-    setFont(QFont("Consolas", 10));
+    applyEditorFont();
     setLineWrapMode(QPlainTextEdit::NoWrap);
     updateLineNumberAreaWidth();
     highlightCurrentLine();
+
+    if (auto* tm = ThemeManager::instance()) {
+        connect(tm, &ThemeManager::themeChanged, this, [this]() {
+            applyEditorFont();
+            m_lineNumberArea->update();
+            highlightCurrentLine();
+            if (m_highlighter != nullptr) {
+                m_highlighter->refreshTheme();
+            }
+        });
+    }
+}
+
+void PythonCodeEditor::changeEvent(QEvent* event)
+{
+    QPlainTextEdit::changeEvent(event);
+    if (event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
+        applyEditorFont();
+        updateLineNumberAreaWidth();
+    }
+}
+
+void PythonCodeEditor::applyEditorFont()
+{
+    if (m_applyingEditorFont) {
+        return;
+    }
+
+    QFont editorFont(QStringLiteral("Consolas"));
+    editorFont.setPointSize(11);
+    editorFont.setFixedPitch(true);
+    editorFont.setStyleHint(QFont::Monospace, QFont::PreferMatch);
+    if (font() != editorFont) {
+        m_applyingEditorFont = true;
+        setFont(editorFont);
+        m_applyingEditorFont = false;
+    }
 }
 
 void PythonCodeEditor::setCode(const QString& code)
@@ -68,7 +109,8 @@ int PythonCodeEditor::lineNumberAreaWidth() const
 void PythonCodeEditor::lineNumberAreaPaintEvent(QPaintEvent* event)
 {
     QPainter painter(m_lineNumberArea);
-    painter.fillRect(event->rect(), QColor("#f3f4f6"));
+    auto* tm = ThemeManager::instance();
+    painter.fillRect(event->rect(), tm ? tm->color("editor-line-bg") : QColor("#f3f4f6"));
 
     auto block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
@@ -77,7 +119,7 @@ void PythonCodeEditor::lineNumberAreaPaintEvent(QPaintEvent* event)
 
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
-            painter.setPen(QColor("#6b7280"));
+            painter.setPen(tm ? tm->color("editor-line-text") : QColor("#6b7280"));
             painter.drawText(0, top, m_lineNumberArea->width() - 6, fontMetrics().height(),
                 Qt::AlignRight, QString::number(blockNumber + 1));
         }
@@ -161,7 +203,8 @@ void PythonCodeEditor::highlightCurrentLine()
 {
     QList<QTextEdit::ExtraSelection> selections;
     QTextEdit::ExtraSelection selection;
-    selection.format.setBackground(QColor("#eff6ff"));
+    auto* tm = ThemeManager::instance();
+    selection.format.setBackground(tm ? tm->color("editor-current-line") : QColor("#eff6ff"));
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     selection.cursor = textCursor();
     selection.cursor.clearSelection();

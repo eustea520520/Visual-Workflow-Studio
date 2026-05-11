@@ -1,4 +1,5 @@
 #include "ui/canvas/NodeGraphicsItem.h"
+#include "ui/theme/ThemeManager.h"
 
 #include <QFont>
 #include <QPainter>
@@ -49,12 +50,12 @@ void NodeGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* 
 
     painter->setRenderHint(QPainter::Antialiasing, true);
 
+    auto* tm = ThemeManager::instance();
+
     const QRectF bodyRect(0, 0, NodeWidth, NodeHeight);
     if (m_state == NodeVisualState::Running) {
-        // Running 节点需要在画布上明显可见。
-        // 这里不用动画，保持节点重绘简单稳定，避免运行状态刷新引入额外定时器。
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(37, 99, 235, 44));
+        painter->setBrush(tm ? tm->color("node-glow-running") : QColor(37, 99, 235, 44));
         painter->drawRoundedRect(bodyRect.adjusted(-7, -7, 7, 7), 12, 12);
     }
 
@@ -71,18 +72,18 @@ void NodeGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* 
     titleFont.setBold(true);
     titleFont.setPointSize(10);
     painter->setFont(titleFont);
-    painter->setPen(QColor("#111827"));
+    painter->setPen(tm ? tm->color("node-text-title") : QColor("#111827"));
     painter->drawText(QRectF(18, 16, NodeWidth - 32, 22), Qt::AlignLeft | Qt::AlignVCenter, m_node.name);
 
     QFont metaFont = painter->font();
     metaFont.setBold(false);
     metaFont.setPointSize(8);
     painter->setFont(metaFont);
-    painter->setPen(QColor("#4b5563"));
+    painter->setPen(tm ? tm->color("node-text-type") : QColor("#4b5563"));
     painter->drawText(QRectF(18, 42, NodeWidth - 32, 18), Qt::AlignLeft | Qt::AlignVCenter, nodeTypeLabel(m_node.type));
 
-    painter->setPen(QPen(QColor("#9ca3af"), 1.4));
-    painter->setBrush(QColor("#ffffff"));
+    painter->setPen(QPen(tm ? tm->color("node-port-border") : QColor("#9ca3af"), 1.4));
+    painter->setBrush(tm ? tm->color("node-port-fill") : QColor("#ffffff"));
     if (!m_node.inputPorts.isEmpty()) {
         painter->drawEllipse(QPointF(0, NodeHeight / 2), 5.5, 5.5);
     }
@@ -90,7 +91,7 @@ void NodeGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* 
         painter->drawEllipse(QPointF(NodeWidth, NodeHeight / 2), 5.5, 5.5);
     }
 
-    painter->setPen(QColor("#6b7280"));
+    painter->setPen(tm ? tm->color("node-text-id") : QColor("#6b7280"));
     painter->drawText(QRectF(18, 67, NodeWidth - 36, 18), Qt::AlignLeft | Qt::AlignVCenter, m_node.nodeId);
 }
 
@@ -180,66 +181,81 @@ void NodeGraphicsItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event)
 
 QColor NodeGraphicsItem::borderColor() const
 {
+    auto* tm = ThemeManager::instance();
+    if (!tm) {
+        return QColor("#6b7280");
+    }
+
     if (isSelected()) {
-        return QColor("#2563eb");
+        return tm->color("primary");
     }
 
     switch (m_state) {
     case NodeVisualState::Running:
-        return QColor("#2563eb");
+        return tm->color("node-border-running");
     case NodeVisualState::Succeeded:
-        return QColor("#16a34a");
+        return tm->color("node-border-succeeded");
     case NodeVisualState::Failed:
-        return QColor("#dc2626");
+        return tm->color("node-border-failed");
     case NodeVisualState::Queued:
-        return QColor("#7c3aed");
+        return tm->color("node-border-queued");
     case NodeVisualState::Pending:
-        return QColor("#9ca3af");
+        return tm->color("node-border-pending");
     case NodeVisualState::Idle:
-        return QColor("#6b7280");
+        return tm->color("node-border-idle");
     }
 
-    return QColor("#6b7280");
+    return tm->color("node-border-idle");
 }
 
 QColor NodeGraphicsItem::fillColor() const
 {
-    switch (m_state) {
-    case NodeVisualState::Running:
-        return QColor("#eff6ff");
-    case NodeVisualState::Succeeded:
-        return QColor("#f0fdf4");
-    case NodeVisualState::Failed:
-        return QColor("#fef2f2");
-    case NodeVisualState::Queued:
-        return QColor("#f5f3ff");
-    case NodeVisualState::Pending:
-        return QColor("#f9fafb");
-    case NodeVisualState::Idle:
+    auto* tm = ThemeManager::instance();
+    if (!tm) {
         return QColor("#ffffff");
     }
 
-    return QColor("#ffffff");
+    switch (m_state) {
+    case NodeVisualState::Running:
+        return tm->color("node-fill-running");
+    case NodeVisualState::Succeeded:
+        return tm->color("node-fill-succeeded");
+    case NodeVisualState::Failed:
+        return tm->color("node-fill-failed");
+    case NodeVisualState::Queued:
+        return tm->color("node-fill-queued");
+    case NodeVisualState::Pending:
+        return tm->color("node-fill-pending");
+    case NodeVisualState::Idle:
+        return tm->color("node-fill-idle");
+    }
+
+    return tm->color("node-fill-idle");
 }
 
 QColor NodeGraphicsItem::stateStripColor() const
 {
-    switch (m_state) {
-    case NodeVisualState::Running:
-        return QColor("#2563eb");
-    case NodeVisualState::Succeeded:
-        return QColor("#16a34a");
-    case NodeVisualState::Failed:
-        return QColor("#dc2626");
-    case NodeVisualState::Queued:
-        return QColor("#7c3aed");
-    case NodeVisualState::Pending:
-        return QColor("#9ca3af");
-    case NodeVisualState::Idle:
+    auto* tm = ThemeManager::instance();
+    if (!tm) {
         return QColor("#64748b");
     }
 
-    return QColor("#64748b");
+    switch (m_state) {
+    case NodeVisualState::Running:
+        return tm->color("node-strip-running");
+    case NodeVisualState::Succeeded:
+        return tm->color("node-strip-succeeded");
+    case NodeVisualState::Failed:
+        return tm->color("node-strip-failed");
+    case NodeVisualState::Queued:
+        return tm->color("node-strip-queued");
+    case NodeVisualState::Pending:
+        return tm->color("node-strip-pending");
+    case NodeVisualState::Idle:
+        return tm->color("node-strip-idle");
+    }
+
+    return tm->color("node-strip-idle");
 }
 
 } // namespace vws::ui

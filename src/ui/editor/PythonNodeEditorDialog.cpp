@@ -14,6 +14,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShortcut>
+#include <QStyle>
 #include <QVBoxLayout>
 
 namespace vws::ui {
@@ -34,7 +35,7 @@ PythonNodeEditorDialog::PythonNodeEditorDialog(
     m_titleEdit->setText(nodeName);
     m_descriptionEdit->setText(nodeDescription);
     m_editor->setCode(initialCode.trimmed().isEmpty() ? defaultCode : initialCode);
-    m_editor->setReadOnly(m_nodeType == "agent");
+    m_editor->setReadOnly(false);
     setDirty(false);
 
     connect(m_titleEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
@@ -74,12 +75,15 @@ void PythonNodeEditorDialog::closeEvent(QCloseEvent* event)
 void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 {
     setWindowTitle(tr("Python Node Editor - %1").arg(nodeName));
+    setObjectName(QStringLiteral("pythonNodeEditorDialog"));
     resize(920, 680);
 
     auto* title = new QLabel(tr("Python Node: %1").arg(nodeName), this);
-    title->setObjectName("panelTitle");
+    title->setObjectName("dialogTitle");
 
     m_saveButton = new QPushButton(tr("Save"), this);
+    m_saveButton->setObjectName(QStringLiteral("saveNodeButton"));
+    m_saveButton->setProperty("buttonRole", "primary");
     auto* header = new QHBoxLayout();
     header->addWidget(title, 1);
     header->addWidget(m_saveButton);
@@ -100,6 +104,7 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 
     m_statusLabel = new QLabel(tr("Line 1, Column 1"), this);
     m_dirtyLabel = new QLabel(this);
+    m_dirtyLabel->setObjectName(QStringLiteral("dirtyStateLabel"));
     auto* footer = new QHBoxLayout();
     footer->addWidget(m_statusLabel);
     footer->addStretch(1);
@@ -143,6 +148,7 @@ void PythonNodeEditorDialog::buildAgentSettings(QVBoxLayout* layout)
         PythonCodeTemplates::defaultAgentTaskPrompt()));
 
     m_loadAgentTemplateButton = new QPushButton(tr("Load Agent Template"), this);
+    m_loadAgentTemplateButton->setProperty("buttonRole", "secondary");
     connect(m_loadAgentTemplateButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::loadAgentTemplate);
 
     auto* agentForm = new QFormLayout();
@@ -235,9 +241,6 @@ void PythonNodeEditorDialog::save()
     if (m_saveButton != nullptr) {
         m_saveButton->setEnabled(false);
     }
-    if (m_nodeType == "agent") {
-        loadAgentTemplate();
-    }
     emit nodeSaved(nodeName(), nodeDescription(), m_editor->code(), agentConfigPatch());
     setDirty(false);
     m_saveInProgress = false;
@@ -270,6 +273,9 @@ void PythonNodeEditorDialog::setDirty(bool dirty)
 {
     m_dirty = dirty;
     m_dirtyLabel->setText(dirty ? tr("Unsaved") : tr("Saved"));
+    m_dirtyLabel->setProperty("dirty", dirty);
+    m_dirtyLabel->style()->unpolish(m_dirtyLabel);
+    m_dirtyLabel->style()->polish(m_dirtyLabel);
     m_saveButton->setEnabled(dirty);
 }
 

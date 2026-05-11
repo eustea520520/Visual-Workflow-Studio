@@ -1,4 +1,5 @@
 #include "ui/editor/PythonSyntaxHighlighter.h"
+#include "ui/theme/ThemeManager.h"
 
 #include <QFont>
 #include <QTextDocument>
@@ -23,12 +24,32 @@ QTextCharFormat makeTextFormat(const QColor& color, bool bold = false, bool ital
 PythonSyntaxHighlighter::PythonSyntaxHighlighter(QTextDocument* parent)
     : QSyntaxHighlighter(parent)
 {
-    const auto keywordFormat = makeTextFormat(QColor("#7c3aed"), true);
-    const auto numberFormat = makeTextFormat(QColor("#b45309"));
-    const auto functionFormat = makeTextFormat(QColor("#2563eb"), true);
-    const auto classFormat = makeTextFormat(QColor("#0f766e"), true);
-    m_stringFormat = makeTextFormat(QColor("#15803d"));
-    m_commentFormat = makeTextFormat(QColor("#6b7280"), false, true);
+    buildRules();
+}
+
+void PythonSyntaxHighlighter::refreshTheme()
+{
+    m_rules.clear();
+    buildRules();
+    rehighlight();
+}
+
+void PythonSyntaxHighlighter::buildRules()
+{
+    auto* tm = ThemeManager::instance();
+
+    const auto keywordFormat = makeTextFormat(
+        tm ? tm->color("syntax-keyword") : QColor("#7c3aed"), true);
+    const auto numberFormat = makeTextFormat(
+        tm ? tm->color("syntax-number") : QColor("#b45309"));
+    const auto functionFormat = makeTextFormat(
+        tm ? tm->color("syntax-function") : QColor("#2563eb"), true);
+    const auto classFormat = makeTextFormat(
+        tm ? tm->color("syntax-class") : QColor("#0f766e"), true);
+    m_stringFormat = makeTextFormat(
+        tm ? tm->color("syntax-string") : QColor("#15803d"));
+    m_commentFormat = makeTextFormat(
+        tm ? tm->color("syntax-comment") : QColor("#6b7280"), false, true);
 
     const QStringList keywords = {
         "def", "class", "if", "else", "elif", "for", "while", "try", "except", "finally",

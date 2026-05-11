@@ -1,10 +1,13 @@
 #include "application/WorkflowService.h"
 #include "ui/editor/PythonCodeTemplates.h"
 #include "ui/editor/PythonCodeEditor.h"
+#include "ui/editor/PythonNodeEditorDialog.h"
 #include "ui/editor/PythonSyntaxHighlighter.h"
 
 #include <QApplication>
+#include <QFontInfo>
 #include <QKeyEvent>
+#include <QPushButton>
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QTextStream>
@@ -114,6 +117,45 @@ int main(int argc, char* argv[])
     }
 
     vws::ui::PythonCodeEditor editor;
+    app.setStyleSheet("QWidget { font-family: Arial; } QPlainTextEdit { font-family: Arial; }");
+    QApplication::processEvents();
+    if (const auto check = expect(QFontInfo(editor.font()).family().contains("Consolas", Qt::CaseInsensitive),
+            "PythonCodeEditor should keep Consolas when the app stylesheet changes the default editor font")) {
+        return check;
+    }
+
+    vws::ui::PythonNodeEditorDialog agentDialog(
+        "Agent",
+        "Calls a model",
+        "agent",
+        {{"io_template", "data_to_data"}},
+        "def run(inputs, context):\n    return {\"outputs\": {\"output\": {\"custom\": True}}, \"artifacts\": []}\n",
+        vws::ui::PythonCodeTemplates::defaultAgentCode());
+    auto* agentEditor = agentDialog.findChild<vws::ui::PythonCodeEditor*>();
+    if (const auto check = expect(agentEditor != nullptr && !agentEditor->isReadOnly(),
+            "Agent Python editor should be editable")) {
+        return check;
+    }
+    const QString customAgentCode = "def run(inputs, context):\n    return {\"outputs\": {\"output\": {\"edited\": True}}, \"artifacts\": []}\n";
+    QString savedAgentCode;
+    QObject::connect(
+        &agentDialog,
+        &vws::ui::PythonNodeEditorDialog::nodeSaved,
+        &agentDialog,
+        [&savedAgentCode](const QString&, const QString&, const QString& code, const QJsonObject&) {
+            savedAgentCode = code;
+        });
+    agentEditor->setCode(customAgentCode);
+    auto* saveButton = agentDialog.findChild<QPushButton*>("saveNodeButton");
+    if (const auto check = expect(saveButton != nullptr, "Agent editor should expose the Save button")) {
+        return check;
+    }
+    saveButton->click();
+    if (const auto check = expect(savedAgentCode == customAgentCode,
+            "Saving an Agent node should preserve manually edited Python code")) {
+        return check;
+    }
+
     editor.setCode({});
     QKeyEvent tabEvent(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
     QApplication::sendEvent(&editor, &tabEvent);

@@ -35,7 +35,7 @@ The canvas updates the in-memory `Workflow`; `WorkflowService` remains responsib
 
 Double-clicking a Python-backed node opens `PythonNodeEditorDialog`.
 
-Function and Starter nodes allow editing title, one-line description, and Python code. Agent nodes expose structured Agent settings and show generated Python code in read-only mode. Saving updates the in-memory node through `WorkflowService::updateNodeDetails(...)`.
+Function, Starter, and Agent nodes allow editing title, one-line description, and Python code. Agent nodes also expose structured Agent settings; the `Load Agent Template` button regenerates code from those fields only when the user explicitly clicks it. Saving updates the in-memory node through `WorkflowService::updateNodeDetails(...)`.
 
 ## Inspector
 

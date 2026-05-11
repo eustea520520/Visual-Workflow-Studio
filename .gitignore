@@ -1,14 +1,19 @@
-# 编译生成的文件夹 (根据你的实际情况，通常以 build- 开头)
-build-*/
+# Build output
 build/
+build-*/
 bin/
 
-# Qt Creator 用户的本地配置文件 (非常重要，不要上传包含个人路径的 .user 文件)
+# Qt Creator local user settings
+CMakeLists.txt.user
 *.pro.user
 *.pro.user.*
 *.creator.user.*
 
-# 编译产生的临时文件
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Native build artifacts
 *.o
 *.obj
 *.exe
@@ -23,6 +28,6 @@ bin/
 *.pdb
 *.idb
 
-# Makefile
+# Makefile generators
 Makefile
 Makefile.**.user

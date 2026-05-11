@@ -2,8 +2,10 @@
 
 #include "ui/canvas/EdgeGraphicsItem.h"
 #include "ui/editor/PythonCodeTemplates.h"
+#include "ui/theme/ThemeManager.h"
 
 #include <QContextMenuEvent>
+#include <QFrame>
 #include <QGraphicsPathItem>
 #include <QGraphicsScene>
 #include <QKeyEvent>
@@ -35,6 +37,7 @@ WorkflowCanvas::WorkflowCanvas(QWidget* parent)
 {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
+    setFrameShape(QFrame::NoFrame);
     setRenderHint(QPainter::Antialiasing, true);
     setDragMode(QGraphicsView::RubberBandDrag);
     setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
@@ -332,7 +335,10 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
             m_edgeDragStartScenePos = sourceNode->outputAnchorScenePos();
             m_edgePreviewItem = new QGraphicsPathItem();
             m_edgePreviewItem->setZValue(0.5);
-            m_edgePreviewItem->setPen(QPen(QColor("#2563eb"), 2.0, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+            auto* tm = ThemeManager::instance();
+            m_edgePreviewItem->setPen(QPen(
+                tm ? tm->color("edge-preview") : QColor("#2563eb"),
+                2.0, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
             m_edgePreviewItem->setPath(edgePreviewPath(m_edgeDragStartScenePos, scenePos));
             m_scene->addItem(m_edgePreviewItem);
             event->accept();
@@ -416,7 +422,8 @@ void WorkflowCanvas::wheelEvent(QWheelEvent* event)
 void WorkflowCanvas::buildScene()
 {
     m_scene->setSceneRect(-2000, -2000, 4000, 4000);
-    m_scene->setBackgroundBrush(QColor("#f7f8fa"));
+    auto* tm = ThemeManager::instance();
+    m_scene->setBackgroundBrush(tm ? tm->color("canvas-bg") : QColor("#f7f8fa"));
 }
 
 void WorkflowCanvas::rebuildSceneFromWorkflow()
@@ -796,6 +803,25 @@ NodeVisualState WorkflowCanvas::visualStateFromStatus(const QString& status) con
         return NodeVisualState::Failed;
     }
     return NodeVisualState::Idle;
+}
+
+void WorkflowCanvas::refreshTheme()
+{
+    auto* tm = ThemeManager::instance();
+    if (m_scene != nullptr) {
+        m_scene->setBackgroundBrush(tm ? tm->color("canvas-bg") : QColor("#F7F8FB"));
+        for (auto* item : m_scene->items()) {
+            item->update();
+        }
+    }
+
+    if (m_edgePreviewItem != nullptr) {
+        m_edgePreviewItem->setPen(QPen(
+            tm ? tm->color("edge-preview") : QColor("#2563EB"),
+            2.0, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+    }
+
+    viewport()->update();
 }
 
 } // namespace vws::ui

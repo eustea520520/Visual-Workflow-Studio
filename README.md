@@ -49,9 +49,9 @@ workspace/
 
 - `starter`: no input ports; creates the initial workflow output.
 - `function`: accepts workflow inputs and runs user Python code.
-- `agent`: runs generated Python code from structured Agent settings: URL, model name, API key, background prompt, and task prompt.
+- `agent`: runs editable Python code, with optional structured settings for URL, model name, API key, background prompt, and task prompt.
 
-All three node types execute through `PythonNodeWorker`; the node type is kept so UI behavior, validation, templates, and generated code stay distinct.
+All three node types execute through `PythonNodeWorker`; the node type is kept so UI behavior, validation, and templates stay distinct. In Agent nodes, `Load Agent Template` can regenerate code from the structured Agent fields, but Save preserves the current editor contents.
 
 ## Data Transfer
 
