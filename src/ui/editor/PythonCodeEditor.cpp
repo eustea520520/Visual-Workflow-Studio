@@ -33,6 +33,8 @@ PythonCodeEditor::PythonCodeEditor(QWidget* parent)
     });
     connect(this, &QPlainTextEdit::textChanged, this, [this]() {
         m_completer->refreshFromCode(toPlainText());
+        highlightCurrentLine();
+        viewport()->update();
     });
     connect(m_completer, QOverload<const QString&>::of(&QCompleter::activated), this, &PythonCodeEditor::insertCompletion);
 
@@ -81,8 +83,14 @@ void PythonCodeEditor::applyEditorFont()
 
 void PythonCodeEditor::setCode(const QString& code)
 {
-    setPlainText(code);
+    if (toPlainText() != code) {
+        setPlainText(code);
+    } else {
+        highlightCurrentLine();
+    }
+
     m_completer->refreshFromCode(code);
+    viewport()->update();
 }
 
 QString PythonCodeEditor::code() const
@@ -202,6 +210,12 @@ void PythonCodeEditor::updateLineNumberArea(const QRect& rect, int dy)
 void PythonCodeEditor::highlightCurrentLine()
 {
     QList<QTextEdit::ExtraSelection> selections;
+
+    if (document()->isEmpty() && !placeholderText().isEmpty()) {
+        setExtraSelections(selections);
+        return;
+    }
+
     QTextEdit::ExtraSelection selection;
     auto* tm = ThemeManager::instance();
     selection.format.setBackground(tm ? tm->color("editor-current-line") : QColor("#eff6ff"));

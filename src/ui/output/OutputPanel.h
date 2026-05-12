@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Artifact.h"
+#include "domain/RunRecord.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -41,12 +42,14 @@ public:
         const QString& threadId,
         const QString& threadName);
     void showExecutionResult(const execution::WorkflowExecutionResult& result);
+    void showRunRecord(
+        const domain::RunRecord& record,
+        const QHash<QString, QJsonObject>& nodeOutputsByNodeId);
 
     void appendStdout(const QString& text);
     void appendDebugOutput(const QString& text);
     void appendStderr(const QString& text);
     void appendTraceback(const QString& text);
-    void showOutputJson(const QString& text);
     void showArtifacts(const QList<domain::Artifact>& artifacts);
 
     QString previewArtifactRows(const QString& filePath, int maxRows) const;
@@ -73,7 +76,6 @@ private:
     QPlainTextEdit* m_debugOutputView = nullptr;
     PythonCodeEditor* m_stderrView = nullptr;
     PythonCodeEditor* m_tracebackView = nullptr;
-    QPlainTextEdit* m_outputJsonView = nullptr;
     QHash<QString, int> m_nodeRunRows;
     QHash<QString, QString> m_nodeNames;
     QString m_workflowName;

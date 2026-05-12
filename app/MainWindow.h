@@ -1,10 +1,15 @@
 #pragma once
 
+#include "domain/RunRecord.h"
 #include "domain/Workflow.h"
 #include "domain/Workspace.h"
 
 #include <QAction>
+#include <QHash>
+#include <QJsonObject>
 #include <QMainWindow>
+#include <QPointF>
+#include <QSet>
 
 class QLabel;
 class QPushButton;
@@ -40,6 +45,10 @@ private:
     void createWorkflow();
     void loadWorkflow();
     void openWorkflowById(const QString& workflowId);
+    void openRunById(const QString& runId);
+    void restoreRunRecordToUi(
+        const domain::RunRecord& record,
+        const domain::Workflow& workflowSnapshot);
     void saveWorkflow();
     void saveSelectedNodeAsTemplate();
     void addNodeFromTemplate();
@@ -48,6 +57,12 @@ private:
     void runCurrentWorkflow();
     void cancelCurrentWorkflowRun();
     void openPythonNodeEditor(const domain::Node& node);
+    void addNodeFromTemplateIdAt(const QString& templateId, const QPointF& scenePos);
+    void resetInspectorAndOutput();
+    void rememberRunWorkflow(const QString& runId, const QString& workflowId);
+    void cacheNodeStatus(const QString& workflowId, const QString& nodeId, const QString& status);
+    void applyCachedNodeStatusesForWorkflow(const QString& workflowId);
+    void markWorkflowRunning(const QString& workflowId, bool running);
     void refreshWorkspaceExplorer();
     void applyWorkspacePythonExecutable();
     void updatePythonStatus();
@@ -82,6 +97,12 @@ private:
     QAction* m_cancelRunAction = nullptr;
     QAction* m_toggleThemeAction = nullptr;
     bool m_workflowRunning = false;
+    QHash<QString, QJsonObject> m_nodeOutputsByNodeId;
+    QString m_selectedNodeId;
+    QHash<QString, QHash<QString, QString>> m_nodeStatusesByWorkflowId;
+    QHash<QString, QString> m_workflowIdByRunId;
+    QSet<QString> m_runningWorkflowIds;
+    QString m_activeRunWorkflowId;
 };
 
 } // namespace vws

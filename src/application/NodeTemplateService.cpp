@@ -178,4 +178,30 @@ bool NodeTemplateService::importTemplateFile(const QString& sourceFilePath, cons
     return saveTemplate(targetWorkspaceRootPath, importedTemplate, errorMessage);
 }
 
+bool NodeTemplateService::loadTemplateFromWorkspace(
+    const QString& workspaceRootPath,
+    const QString& templateId,
+    domain::NodeTemplate& nodeTemplate,
+    QString* errorMessage) const
+{
+    if (workspaceRootPath.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Workspace path is empty.");
+        }
+        return false;
+    }
+
+    if (templateId.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Template id is empty.");
+        }
+        return false;
+    }
+
+    const auto path = QDir(workspaceRootPath)
+        .filePath(QString("node_templates/%1.json").arg(templateId));
+
+    return loadTemplate(path, nodeTemplate, errorMessage);
+}
+
 } // namespace vws::application

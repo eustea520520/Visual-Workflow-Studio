@@ -2,6 +2,8 @@
 
 #include "domain/Node.h"
 
+#include <QJsonObject>
+#include <QString>
 #include <QWidget>
 
 class QComboBox;
@@ -20,6 +22,9 @@ public:
     explicit NodeInspector(QWidget* parent = nullptr);
 
     void displayNode(const domain::Node& node);
+    void displayNode(const domain::Node& node, const QJsonObject& selectedNodeOutput);
+    void clearSelectedNodeOutput();
+    void clear();
 
 private:
     void buildUi();
@@ -27,7 +32,9 @@ private:
     void setReadOnly(QPlainTextEdit* edit);
 
     PythonCodeEditor* m_pythonEditor = nullptr;
+    PythonCodeEditor* m_outputJsonEditor = nullptr;
     QTabWidget* m_tabs = nullptr;
+    QString m_currentNodeId;
     QLineEdit* m_agentTitleEdit = nullptr;
     QLineEdit* m_agentDescriptionEdit = nullptr;
     QLineEdit* m_agentTimeoutEdit = nullptr;
@@ -35,6 +42,7 @@ private:
     QLineEdit* m_agentUrlEdit = nullptr;
     QLineEdit* m_agentModelEdit = nullptr;
     QLineEdit* m_agentApiKeyEdit = nullptr;
+    QLineEdit* m_agentMaxRetriesEdit = nullptr;
     QPlainTextEdit* m_agentBackgroundPromptEdit = nullptr;
     QPlainTextEdit* m_agentTaskPromptEdit = nullptr;
 };

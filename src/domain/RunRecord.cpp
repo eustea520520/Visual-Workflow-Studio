@@ -56,6 +56,7 @@ QJsonObject RunRecord::toJson() const
         {"started_at", startedAt},
         {"finished_at", finishedAt},
         {"summary_path", summaryPath},
+        {"workflow_snapshot_path", workflowSnapshotPath},
         {"node_runs", nodeRunArray},
         {"artifacts", artifactArray},
     };
@@ -71,6 +72,7 @@ RunRecord RunRecord::fromJson(const QJsonObject& object)
     record.startedAt = object.value("started_at").toString();
     record.finishedAt = object.value("finished_at").toString();
     record.summaryPath = object.value("summary_path").toString();
+    record.workflowSnapshotPath = object.value("workflow_snapshot_path").toString();
 
     const auto nodeRuns = object.value("node_runs").toArray();
     for (const auto& nodeRunValue : nodeRuns) {

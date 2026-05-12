@@ -5,6 +5,10 @@
 #include "ui/theme/ThemeManager.h"
 
 #include <QContextMenuEvent>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFrame>
 #include <QGraphicsPathItem>
 #include <QGraphicsScene>
@@ -12,11 +16,13 @@
 #include <QKeySequence>
 #include <QLineF>
 #include <QMenu>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
 #include <QScrollBar>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QUuid>
 #include <QWheelEvent>
@@ -37,12 +43,28 @@ WorkflowCanvas::WorkflowCanvas(QWidget* parent)
 {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
+    connect(m_scene, &QGraphicsScene::selectionChanged, this, [this]() {
+        for (auto* item : m_scene->selectedItems()) {
+            if (dynamic_cast<NodeGraphicsItem*>(item) != nullptr) {
+                return;
+            }
+        }
+        emit nodeSelectionCleared();
+    });
     setFrameShape(QFrame::NoFrame);
     setRenderHint(QPainter::Antialiasing, true);
     setDragMode(QGraphicsView::RubberBandDrag);
     setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    setAcceptDrops(true);
     buildScene();
+}
+
+WorkflowCanvas::~WorkflowCanvas()
+{
+    if (m_scene != nullptr) {
+        QObject::disconnect(m_scene, nullptr, this, nullptr);
+    }
 }
 
 void WorkflowCanvas::setWorkflow(const domain::Workflow& workflow)
@@ -302,6 +324,24 @@ void WorkflowCanvas::keyPressEvent(QKeyEvent* event)
 
     if (event->matches(QKeySequence::Undo)) {
         undoLastChange();
+        event->accept();
+        return;
+    }
+
+    if (event->matches(QKeySequence::Copy)) {
+        copySelectedNodes();
+        event->accept();
+        return;
+    }
+
+    if (event->matches(QKeySequence::Cut)) {
+        cutSelectedNodes();
+        event->accept();
+        return;
+    }
+
+    if (event->matches(QKeySequence::Paste)) {
+        pasteClipboardNodes();
         event->accept();
         return;
     }
@@ -724,16 +764,18 @@ domain::Node WorkflowCanvas::createAgentNode(const QPointF& scenePos, DataTransf
     node.config = {
         {"language", "python"},
         {"entry", "run"},
-        {"agent_url", PythonCodeTemplates::defaultAgentUrl()},
-        {"agent_model", PythonCodeTemplates::defaultAgentModel()},
+        {"agent_url", ""},
+        {"agent_model", ""},
         {"agent_api_key", ""},
+        {"agent_max_retries", PythonCodeTemplates::defaultAgentMaxRetries()},
         {"agent_background_prompt", PythonCodeTemplates::defaultAgentBackgroundPrompt()},
         {"agent_task_prompt", PythonCodeTemplates::defaultAgentTaskPrompt()},
         {"io_template", PythonCodeTemplates::templateKey(templateKind)},
         {"code", PythonCodeTemplates::agentCode(
-                PythonCodeTemplates::defaultAgentUrl(),
-                PythonCodeTemplates::defaultAgentModel(),
                 QString(),
+                QString(),
+                QString(),
+                PythonCodeTemplates::defaultAgentMaxRetries(),
                 PythonCodeTemplates::defaultAgentBackgroundPrompt(),
                 PythonCodeTemplates::defaultAgentTaskPrompt(),
                 templateKind)},
@@ -822,6 +864,173 @@ void WorkflowCanvas::refreshTheme()
     }
 
     viewport()->update();
+}
+
+QList<NodeGraphicsItem*> WorkflowCanvas::selectedNodeItems() const
+{
+    QList<NodeGraphicsItem*> nodes;
+
+    for (auto* item : m_scene->selectedItems()) {
+        if (auto* nodeItem = dynamic_cast<NodeGraphicsItem*>(item)) {
+            nodes.append(nodeItem);
+        }
+    }
+
+    return nodes;
+}
+
+void WorkflowCanvas::copySelectedNodes()
+{
+    const auto selectedNodes = selectedNodeItems();
+    if (selectedNodes.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> selectedNodeIds;
+    m_clipboardWorkflow = {};
+    m_clipboardWorkflow.nodes.clear();
+    m_clipboardWorkflow.edges.clear();
+
+    for (auto* item : selectedNodes) {
+        const auto node = item->node();
+        selectedNodeIds.insert(node.nodeId);
+        m_clipboardWorkflow.nodes.append(node);
+    }
+
+    for (const auto& edge : m_workflow.edges) {
+        if (selectedNodeIds.contains(edge.fromNode) &&
+            selectedNodeIds.contains(edge.toNode)) {
+            m_clipboardWorkflow.edges.append(edge);
+        }
+    }
+
+    m_hasClipboardNodes = true;
+    m_pasteCount = 0;
+}
+
+void WorkflowCanvas::cutSelectedNodes()
+{
+    if (selectedNodeItems().isEmpty()) {
+        return;
+    }
+
+    copySelectedNodes();
+    deleteSelectedItems();
+}
+
+void WorkflowCanvas::pasteClipboardNodes()
+{
+    if (!m_hasClipboardNodes || m_clipboardWorkflow.nodes.isEmpty()) {
+        return;
+    }
+
+    pushUndoState();
+
+    ++m_pasteCount;
+    const qreal offset = 32.0 * m_pasteCount;
+
+    QHash<QString, QString> oldToNewNodeIds;
+
+    QList<domain::Node> nodesToAdd;
+    for (auto node : m_clipboardWorkflow.nodes) {
+        const auto oldId = node.nodeId;
+        node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        node.name = tr("%1 Copy").arg(node.name);
+        node.position.x += offset;
+        node.position.y += offset;
+
+        oldToNewNodeIds.insert(oldId, node.nodeId);
+        nodesToAdd.append(node);
+    }
+
+    QList<domain::Edge> edgesToAdd;
+    for (auto edge : m_clipboardWorkflow.edges) {
+        if (!oldToNewNodeIds.contains(edge.fromNode) ||
+            !oldToNewNodeIds.contains(edge.toNode)) {
+            continue;
+        }
+
+        edge.edgeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        edge.fromNode = oldToNewNodeIds.value(edge.fromNode);
+        edge.toNode = oldToNewNodeIds.value(edge.toNode);
+        edgesToAdd.append(edge);
+    }
+
+    m_scene->clearSelection();
+
+    for (const auto& node : nodesToAdd) {
+        m_workflow.nodes.append(node);
+        addNodeItem(node);
+        if (auto* item = m_nodeItems.value(node.nodeId, nullptr)) {
+            item->setSelected(true);
+        }
+    }
+
+    for (const auto& edge : edgesToAdd) {
+        m_workflow.edges.append(edge);
+        addEdgeItem(edge);
+    }
+
+    updateAllEdgeRoutes();
+    emit workflowChanged(workflow());
+}
+
+namespace {
+constexpr const char* NodeTemplateMimeType = "application/x-vws-node-template-id";
+}
+
+void WorkflowCanvas::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (event->mimeData()->hasFormat(NodeTemplateMimeType)) {
+        setDragMode(QGraphicsView::NoDrag);
+        event->acceptProposedAction();
+        return;
+    }
+
+    QGraphicsView::dragEnterEvent(event);
+}
+
+void WorkflowCanvas::dragMoveEvent(QDragMoveEvent* event)
+{
+    if (event->mimeData()->hasFormat(NodeTemplateMimeType)) {
+        event->acceptProposedAction();
+        return;
+    }
+
+    QGraphicsView::dragMoveEvent(event);
+}
+
+void WorkflowCanvas::dragLeaveEvent(QDragLeaveEvent* event)
+{
+    setDragMode(QGraphicsView::RubberBandDrag);
+    QGraphicsView::dragLeaveEvent(event);
+}
+
+void WorkflowCanvas::dropEvent(QDropEvent* event)
+{
+    setDragMode(QGraphicsView::RubberBandDrag);
+
+    if (!event->mimeData()->hasFormat(NodeTemplateMimeType)) {
+        QGraphicsView::dropEvent(event);
+        return;
+    }
+
+    const auto templateId = QString::fromUtf8(
+        event->mimeData()->data(NodeTemplateMimeType)).trimmed();
+
+    if (templateId.isEmpty()) {
+        event->ignore();
+        return;
+    }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const auto scenePos = mapToScene(event->position().toPoint());
+#else
+    const auto scenePos = mapToScene(event->pos());
+#endif
+
+    emit nodeTemplateDropped(templateId, scenePos);
+    event->acceptProposedAction();
 }
 
 } // namespace vws::ui

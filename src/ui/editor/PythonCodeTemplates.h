@@ -34,12 +34,17 @@ public:
 
     static QString defaultAgentUrl();
     static QString defaultAgentModel();
+    static QString agentUrlPlaceholder();
+    static QString agentModelPlaceholder();
+    static QString agentApiKeyPlaceholder();
+    static int defaultAgentMaxRetries();
     static QString defaultAgentBackgroundPrompt();
     static QString defaultAgentTaskPrompt();
     static QString agentCode(
         const QString& url,
         const QString& model,
         const QString& apiKey,
+        int maxRetries,
         const QString& backgroundPrompt,
         const QString& taskPrompt,
         DataTransferTemplate transferTemplate = DataTransferTemplate::DataToData);

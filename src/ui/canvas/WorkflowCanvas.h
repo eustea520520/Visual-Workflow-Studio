@@ -32,6 +32,7 @@ class WorkflowCanvas final : public QGraphicsView {
 
 public:
     explicit WorkflowCanvas(QWidget* parent = nullptr);
+    ~WorkflowCanvas() override;
 
     void setWorkflow(const domain::Workflow& workflow);
     domain::Workflow workflow() const;
@@ -49,9 +50,11 @@ public:
 
 signals:
     void nodeSelected(const domain::Node& node);
+    void nodeSelectionCleared();
     void nodeDoubleClicked(const domain::Node& node);
     void workflowChanged(const domain::Workflow& workflow);
     void saveRequested();
+    void nodeTemplateDropped(const QString& templateId, const QPointF& scenePos);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -60,6 +63,10 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     enum class StarterTemplateKind {
@@ -92,6 +99,10 @@ private:
     NodeGraphicsItem* inputNodeAt(const QPointF& scenePos, const QString& excludedNodeId = {}) const;
     QPainterPath edgePreviewPath(const QPointF& start, const QPointF& end) const;
     NodeVisualState visualStateFromStatus(const QString& status) const;
+    QList<NodeGraphicsItem*> selectedNodeItems() const;
+    void copySelectedNodes();
+    void cutSelectedNodes();
+    void pasteClipboardNodes();
 
     QGraphicsScene* m_scene = nullptr;
     domain::Workflow m_workflow;
@@ -105,6 +116,9 @@ private:
     bool m_rightButtonPanning = false;
     QPoint m_lastPanViewportPos;
     Qt::CursorShape m_previousCursor = Qt::ArrowCursor;
+    domain::Workflow m_clipboardWorkflow;
+    bool m_hasClipboardNodes = false;
+    int m_pasteCount = 0;
 };
 
 } // namespace vws::ui

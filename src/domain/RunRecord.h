@@ -36,6 +36,7 @@ struct RunRecord {
     QString startedAt;
     QString finishedAt;
     QString summaryPath;
+    QString workflowSnapshotPath;
     QList<NodeRunRecord> nodeRuns;
     QList<Artifact> artifacts;
 

@@ -451,6 +451,10 @@ QDialog {
 QDialog QLabel {
     color: #0F172A;
 }
+QScrollArea#agentEditorSplitter QScrollArea,
+QWidget#agentEditorLeftPanel {
+    background: transparent;
+}
 QLabel#dialogTitle {
     color: #0F172A;
     font-size: 15px;
@@ -504,6 +508,13 @@ QPlainTextEdit#tracebackView {
 QPlainTextEdit#outputJsonView {
     background: #F8FAFC;
     border-color: #E2E8F0;
+}
+
+/* ── Save button disabled state ────────────────────────────── */
+QPushButton#saveNodeButton:disabled {
+    background: #E5E7EB;
+    color: #9CA3AF;
+    border: 1px solid #D1D5DB;
 }
 
 /* ── QMessageBox / QInputDialog (generic QDialog fallback) ── */

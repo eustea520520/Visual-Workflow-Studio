@@ -7,13 +7,16 @@
 #include <QFrame>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIntValidator>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QShortcut>
+#include <QSplitter>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -22,6 +25,7 @@ namespace vws::ui {
 PythonNodeEditorDialog::PythonNodeEditorDialog(
     const QString& nodeName,
     const QString& nodeDescription,
+    int timeoutMs,
     const QString& nodeType,
     const QJsonObject& nodeConfig,
     const QString& initialCode,
@@ -34,12 +38,14 @@ PythonNodeEditorDialog::PythonNodeEditorDialog(
     buildUi(nodeName);
     m_titleEdit->setText(nodeName);
     m_descriptionEdit->setText(nodeDescription);
+    m_timeoutEdit->setText(QString::number(timeoutMs));
     m_editor->setCode(initialCode.trimmed().isEmpty() ? defaultCode : initialCode);
     m_editor->setReadOnly(false);
     setDirty(false);
 
     connect(m_titleEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_descriptionEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
+    connect(m_timeoutEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_editor, &QPlainTextEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_editor, &PythonCodeEditor::cursorPositionInfoChanged, this, &PythonNodeEditorDialog::updateCursorStatus);
     connect(m_saveButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::save);
@@ -74,9 +80,16 @@ void PythonNodeEditorDialog::closeEvent(QCloseEvent* event)
 
 void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 {
+    const bool isAgent = m_nodeType == "agent";
+
     setWindowTitle(tr("Python Node Editor - %1").arg(nodeName));
     setObjectName(QStringLiteral("pythonNodeEditorDialog"));
-    resize(920, 680);
+    if (isAgent) {
+        resize(1280, 760);
+        setMinimumSize(1100, 680);
+    } else {
+        resize(920, 680);
+    }
 
     auto* title = new QLabel(tr("Python Node: %1").arg(nodeName), this);
     title->setObjectName("dialogTitle");
@@ -95,9 +108,14 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
     m_descriptionEdit->setPlaceholderText(tr("Describe what this node does"));
     m_descriptionEdit->setFixedHeight(28);
 
+    m_timeoutEdit = new QLineEdit(this);
+    m_timeoutEdit->setPlaceholderText(tr("300000"));
+    m_timeoutEdit->setValidator(new QIntValidator(1, 86400000, m_timeoutEdit));
+
     auto* metadataForm = new QFormLayout();
     metadataForm->addRow(tr("Title"), m_titleEdit);
     metadataForm->addRow(tr("Description"), m_descriptionEdit);
+    metadataForm->addRow(tr("Timeout (ms)"), m_timeoutEdit);
 
     m_editor = new PythonCodeEditor(this);
     m_editor->setPlaceholderText(PythonCodeTemplates::defaultFunctionCode());
@@ -112,59 +130,118 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(header);
-    layout->addLayout(metadataForm);
-    if (m_nodeType == "agent") {
-        buildAgentSettings(layout);
+
+    if (isAgent) {
+        // Create agent-specific widgets inline so the single QFormLayout owns all widths.
+        m_agentUrlEdit = new QLineEdit(this);
+        m_agentUrlEdit->setPlaceholderText(PythonCodeTemplates::agentUrlPlaceholder());
+        m_agentUrlEdit->setText(m_nodeConfig.value("agent_url").toString());
+
+        m_agentModelEdit = new QLineEdit(this);
+        m_agentModelEdit->setPlaceholderText(PythonCodeTemplates::agentModelPlaceholder());
+        m_agentModelEdit->setText(m_nodeConfig.value("agent_model").toString());
+
+        m_agentApiKeyEdit = new QLineEdit(this);
+        m_agentApiKeyEdit->setEchoMode(QLineEdit::Password);
+        m_agentApiKeyEdit->setPlaceholderText(PythonCodeTemplates::agentApiKeyPlaceholder());
+        m_agentApiKeyEdit->setText(m_nodeConfig.value("agent_api_key").toString());
+
+        m_agentMaxRetriesEdit = new QLineEdit(this);
+        m_agentMaxRetriesEdit->setPlaceholderText(QString::number(PythonCodeTemplates::defaultAgentMaxRetries()));
+        m_agentMaxRetriesEdit->setText(QString::number(
+            m_nodeConfig.value("agent_max_retries").toInt(PythonCodeTemplates::defaultAgentMaxRetries())));
+        m_agentMaxRetriesEdit->setValidator(new QIntValidator(1, 100, m_agentMaxRetriesEdit));
+
+        m_agentBackgroundPromptEdit = new QPlainTextEdit(this);
+        m_agentBackgroundPromptEdit->setMinimumHeight(110);
+        m_agentBackgroundPromptEdit->setPlainText(m_nodeConfig.value("agent_background_prompt").toString(
+            PythonCodeTemplates::defaultAgentBackgroundPrompt()));
+
+        m_agentTaskPromptEdit = new QPlainTextEdit(this);
+        m_agentTaskPromptEdit->setMinimumHeight(150);
+        m_agentTaskPromptEdit->setPlainText(m_nodeConfig.value("agent_task_prompt").toString(
+            PythonCodeTemplates::defaultAgentTaskPrompt()));
+
+        m_loadAgentTemplateButton = new QPushButton(tr("Load Agent Template"), this);
+        m_loadAgentTemplateButton->setProperty("buttonRole", "secondary");
+        connect(m_loadAgentTemplateButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::loadAgentTemplate);
+
+        connect(m_agentUrlEdit, &QLineEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+        connect(m_agentModelEdit, &QLineEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+        connect(m_agentApiKeyEdit, &QLineEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+        connect(m_agentMaxRetriesEdit, &QLineEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+        connect(m_agentBackgroundPromptEdit, &QPlainTextEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+        connect(m_agentTaskPromptEdit, &QPlainTextEdit::textChanged, this, [this]() { markAgentTemplateNeedsRefresh(); });
+
+        auto* leftPanel = new QWidget(this);
+        leftPanel->setObjectName(QStringLiteral("agentEditorLeftPanel"));
+        leftPanel->setAutoFillBackground(false);
+        auto* leftLayout = new QVBoxLayout(leftPanel);
+        leftLayout->setContentsMargins(0, 0, 0, 0);
+        leftLayout->setSpacing(0);
+
+        auto* leftForm = new QFormLayout();
+        leftForm->setContentsMargins(0, 0, 0, 0);
+        leftForm->setHorizontalSpacing(10);
+        leftForm->setVerticalSpacing(8);
+        leftForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        leftForm->addRow(tr("Title"), m_titleEdit);
+        leftForm->addRow(tr("Description"), m_descriptionEdit);
+        leftForm->addRow(tr("Timeout (ms)"), m_timeoutEdit);
+        leftForm->addRow(tr("URL"), m_agentUrlEdit);
+        leftForm->addRow(tr("Model name"), m_agentModelEdit);
+        leftForm->addRow(tr("API key"), m_agentApiKeyEdit);
+        leftForm->addRow(tr("Max request retries"), m_agentMaxRetriesEdit);
+        leftLayout->addLayout(leftForm);
+
+        auto* bgLabel = new QLabel(tr("Background prompt"), leftPanel);
+        leftLayout->addSpacing(8);
+        leftLayout->addWidget(bgLabel);
+        leftLayout->addWidget(m_agentBackgroundPromptEdit);
+
+        auto* taskLabel = new QLabel(tr("Task goal prompt"), leftPanel);
+        leftLayout->addSpacing(8);
+        leftLayout->addWidget(taskLabel);
+        leftLayout->addWidget(m_agentTaskPromptEdit);
+
+        leftLayout->addSpacing(8);
+        leftLayout->addWidget(m_loadAgentTemplateButton);
+        leftLayout->addStretch(1);
+
+        auto* leftScrollArea = new QScrollArea(this);
+        leftScrollArea->setWidgetResizable(true);
+        leftScrollArea->setFrameShape(QFrame::NoFrame);
+        leftScrollArea->setAutoFillBackground(false);
+        leftScrollArea->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }"));
+        leftScrollArea->setWidget(leftPanel);
+
+        auto* rightPanel = new QWidget(this);
+        auto* rightLayout = new QVBoxLayout(rightPanel);
+        rightLayout->setContentsMargins(0, 0, 0, 0);
+        rightLayout->addWidget(m_editor, 1);
+        m_editor->setMinimumWidth(620);
+
+        auto* bodySplitter = new QSplitter(Qt::Horizontal, this);
+        bodySplitter->setObjectName(QStringLiteral("agentEditorSplitter"));
+        bodySplitter->addWidget(leftScrollArea);
+        bodySplitter->addWidget(rightPanel);
+        bodySplitter->setStretchFactor(0, 0);
+        bodySplitter->setStretchFactor(1, 1);
+        bodySplitter->setSizes({390, 850});
+
+        layout->addWidget(bodySplitter, 1);
+    } else {
+        layout->addLayout(metadataForm);
+        layout->addWidget(m_editor, 1);
     }
-    layout->addWidget(m_editor, 1);
+
     layout->addLayout(footer);
 }
 
 void PythonNodeEditorDialog::buildAgentSettings(QVBoxLayout* layout)
 {
-    auto* separator = new QFrame(this);
-    separator->setFrameShape(QFrame::HLine);
-    separator->setFrameShadow(QFrame::Sunken);
-    layout->addWidget(separator);
-
-    m_agentUrlEdit = new QLineEdit(this);
-    m_agentUrlEdit->setText(m_nodeConfig.value("agent_url").toString(PythonCodeTemplates::defaultAgentUrl()));
-
-    m_agentModelEdit = new QLineEdit(this);
-    m_agentModelEdit->setText(m_nodeConfig.value("agent_model").toString(PythonCodeTemplates::defaultAgentModel()));
-
-    m_agentApiKeyEdit = new QLineEdit(this);
-    m_agentApiKeyEdit->setEchoMode(QLineEdit::Password);
-    m_agentApiKeyEdit->setText(m_nodeConfig.value("agent_api_key").toString());
-
-    m_agentBackgroundPromptEdit = new QPlainTextEdit(this);
-    m_agentBackgroundPromptEdit->setFixedHeight(70);
-    m_agentBackgroundPromptEdit->setPlainText(m_nodeConfig.value("agent_background_prompt").toString(
-        PythonCodeTemplates::defaultAgentBackgroundPrompt()));
-
-    m_agentTaskPromptEdit = new QPlainTextEdit(this);
-    m_agentTaskPromptEdit->setFixedHeight(70);
-    m_agentTaskPromptEdit->setPlainText(m_nodeConfig.value("agent_task_prompt").toString(
-        PythonCodeTemplates::defaultAgentTaskPrompt()));
-
-    m_loadAgentTemplateButton = new QPushButton(tr("Load Agent Template"), this);
-    m_loadAgentTemplateButton->setProperty("buttonRole", "secondary");
-    connect(m_loadAgentTemplateButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::loadAgentTemplate);
-
-    auto* agentForm = new QFormLayout();
-    agentForm->addRow(tr("URL"), m_agentUrlEdit);
-    agentForm->addRow(tr("Model name"), m_agentModelEdit);
-    agentForm->addRow(tr("API key"), m_agentApiKeyEdit);
-    agentForm->addRow(tr("Background prompt"), m_agentBackgroundPromptEdit);
-    agentForm->addRow(tr("Task goal prompt"), m_agentTaskPromptEdit);
-    agentForm->addRow(QString(), m_loadAgentTemplateButton);
-    layout->addLayout(agentForm);
-
-    connect(m_agentUrlEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
-    connect(m_agentModelEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
-    connect(m_agentApiKeyEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
-    connect(m_agentBackgroundPromptEdit, &QPlainTextEdit::textChanged, this, [this]() { setDirty(true); });
-    connect(m_agentTaskPromptEdit, &QPlainTextEdit::textChanged, this, [this]() { setDirty(true); });
+    Q_UNUSED(layout);
+    // Widget creation moved inline into buildUi() for uniform form layout widths.
 }
 
 void PythonNodeEditorDialog::loadAgentTemplate()
@@ -173,13 +250,7 @@ void PythonNodeEditorDialog::loadAgentTemplate()
         return;
     }
 
-    m_editor->setCode(PythonCodeTemplates::agentCode(
-        agentUrl(),
-        agentModel(),
-        agentApiKey(),
-        agentBackgroundPrompt(),
-        agentTaskPrompt(),
-        agentTransferTemplate()));
+    applyAgentTemplateToEditor();
     setDirty(true);
 }
 
@@ -193,6 +264,7 @@ QJsonObject PythonNodeEditorDialog::agentConfigPatch() const
         {"agent_url", agentUrl()},
         {"agent_model", agentModel()},
         {"agent_api_key", agentApiKey()},
+        {"agent_max_retries", agentMaxRetries()},
         {"agent_background_prompt", agentBackgroundPrompt()},
         {"agent_task_prompt", agentTaskPrompt()},
         {"io_template", PythonCodeTemplates::templateKey(agentTransferTemplate())},
@@ -231,17 +303,146 @@ DataTransferTemplate PythonNodeEditorDialog::agentTransferTemplate() const
         DataTransferTemplate::DataToData);
 }
 
+int PythonNodeEditorDialog::timeoutMs() const
+{
+    bool ok = false;
+    const int value = m_timeoutEdit != nullptr
+        ? m_timeoutEdit->text().trimmed().toInt(&ok)
+        : 300000;
+
+    return ok ? value : 300000;
+}
+
+bool PythonNodeEditorDialog::validateTimeout(QString* errorMessage) const
+{
+    if (m_timeoutEdit == nullptr) {
+        return true;
+    }
+
+    const auto text = m_timeoutEdit->text().trimmed();
+    if (text.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = tr("Timeout is required.");
+        }
+        return false;
+    }
+
+    bool ok = false;
+    const int value = text.toInt(&ok);
+
+    if (!ok) {
+        if (errorMessage) {
+            *errorMessage = tr("Timeout must be an integer number of milliseconds.");
+        }
+        return false;
+    }
+
+    if (value <= 0) {
+        if (errorMessage) {
+            *errorMessage = tr("Timeout must be greater than 0 ms.");
+        }
+        return false;
+    }
+
+    if (value > 86400000) {
+        if (errorMessage) {
+            *errorMessage = tr("Timeout must not exceed 86400000 ms.");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+int PythonNodeEditorDialog::agentMaxRetries() const
+{
+    if (m_agentMaxRetriesEdit == nullptr) {
+        return PythonCodeTemplates::defaultAgentMaxRetries();
+    }
+
+    bool ok = false;
+    const int value = m_agentMaxRetriesEdit->text().trimmed().toInt(&ok);
+    if (!ok || value < 1) {
+        return PythonCodeTemplates::defaultAgentMaxRetries();
+    }
+
+    return value;
+}
+
+bool PythonNodeEditorDialog::validateAgentMaxRetries(QString* errorMessage) const
+{
+    if (m_nodeType != "agent") {
+        return true;
+    }
+
+    if (m_agentMaxRetriesEdit == nullptr) {
+        return true;
+    }
+
+    const auto text = m_agentMaxRetriesEdit->text().trimmed();
+    if (text.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Max request retries is required.");
+        }
+        return false;
+    }
+
+    bool ok = false;
+    const int value = text.toInt(&ok);
+
+    if (!ok) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Max request retries must be an integer.");
+        }
+        return false;
+    }
+
+    if (value < 1) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Max request retries must be at least 1.");
+        }
+        return false;
+    }
+
+    if (value > 100) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Max request retries must not exceed 100.");
+        }
+        return false;
+    }
+
+    return true;
+}
+
 void PythonNodeEditorDialog::save()
 {
     if (m_saveInProgress) {
         return;
     }
 
+    QString errorMessage;
+    if (!validateTimeout(&errorMessage)) {
+        QMessageBox::warning(this, tr("Invalid Timeout"), errorMessage);
+        return;
+    }
+
+    if (!validateAgentMaxRetries(&errorMessage)) {
+        QMessageBox::warning(this, tr("Invalid Agent Retries"), errorMessage);
+        return;
+    }
+
+    // Requirement: when Agent settings change, saving should behave like
+    // clicking "Load Agent Template" first, so the generated Python code
+    // always contains the latest Agent settings.
+    if (m_nodeType == "agent" && m_agentTemplateNeedsRefresh) {
+        applyAgentTemplateToEditor();
+    }
+
     m_saveInProgress = true;
     if (m_saveButton != nullptr) {
         m_saveButton->setEnabled(false);
     }
-    emit nodeSaved(nodeName(), nodeDescription(), m_editor->code(), agentConfigPatch());
+    emit nodeSaved(nodeName(), nodeDescription(), timeoutMs(), m_editor->code(), agentConfigPatch());
     setDirty(false);
     m_saveInProgress = false;
 }
@@ -277,11 +478,42 @@ void PythonNodeEditorDialog::setDirty(bool dirty)
     m_dirtyLabel->style()->unpolish(m_dirtyLabel);
     m_dirtyLabel->style()->polish(m_dirtyLabel);
     m_saveButton->setEnabled(dirty);
+    m_saveButton->setToolTip(dirty
+        ? tr("Save changes")
+        : tr("No unsaved changes"));
 }
 
 void PythonNodeEditorDialog::updateCursorStatus(int line, int column)
 {
     m_statusLabel->setText(tr("Line %1, Column %2").arg(line).arg(column));
+}
+
+void PythonNodeEditorDialog::markAgentTemplateNeedsRefresh()
+{
+    if (m_nodeType != "agent") {
+        return;
+    }
+
+    m_agentTemplateNeedsRefresh = true;
+    setDirty(true);
+}
+
+void PythonNodeEditorDialog::applyAgentTemplateToEditor()
+{
+    if (m_nodeType != "agent" || m_editor == nullptr) {
+        return;
+    }
+
+    m_editor->setCode(PythonCodeTemplates::agentCode(
+        agentUrl(),
+        agentModel(),
+        agentApiKey(),
+        agentMaxRetries(),
+        agentBackgroundPrompt(),
+        agentTaskPrompt(),
+        agentTransferTemplate()));
+
+    m_agentTemplateNeedsRefresh = false;
 }
 
 } // namespace vws::ui

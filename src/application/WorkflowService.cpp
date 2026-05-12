@@ -73,6 +73,47 @@ bool WorkflowService::updateNodeDetails(
     const QString& nodeId,
     const QString& name,
     const QString& description,
+    int timeoutMs,
+    const QString& code,
+    const QJsonObject& configPatch,
+    QString* errorMessage) const
+{
+    if (timeoutMs <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Node timeout must be greater than 0 ms.");
+        }
+        return false;
+    }
+
+    for (auto& node : workflow.nodes) {
+        if (node.nodeId != nodeId) {
+            continue;
+        }
+
+        node.name = name.trimmed().isEmpty() ? node.name : name.trimmed();
+        node.description = description;
+        node.runtime.timeoutMs = timeoutMs;
+        node.config.insert("language", node.config.value("language").toString("python"));
+        node.config.insert("entry", node.config.value("entry").toString("run"));
+        node.config.insert("code", code);
+        for (auto it = configPatch.constBegin(); it != configPatch.constEnd(); ++it) {
+            node.config.insert(it.key(), it.value());
+        }
+        workflow.updatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = QString("Node not found: %1").arg(nodeId);
+    }
+    return false;
+}
+
+bool WorkflowService::updateNodeDetails(
+    domain::Workflow& workflow,
+    const QString& nodeId,
+    const QString& name,
+    const QString& description,
     const QString& code,
     const QJsonObject& configPatch,
     QString* errorMessage) const

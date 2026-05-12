@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QSet>
 #include <QStringList>
 #include <QWidget>
 
@@ -24,21 +25,31 @@ public:
         const QStringList& workflowNames,
         const QStringList& workflowIds,
         const QStringList& templateNames,
-        const QStringList& runNames = {});
+        const QStringList& templateIds = {},
+        const QStringList& runNames = {},
+        const QStringList& runIds = {},
+        const QSet<QString>& runningWorkflowIds = {});
 
 signals:
     void workflowActivated(const QString& workflowId);
+    void runActivated(const QString& runId);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void buildUi();
     void rebuildCategory(QTreeWidgetItem* rootItem, const QStringList& names, const QString& emptyText);
-    void rebuildWorkflowCategory(const QStringList& names, const QStringList& workflowIds);
+    void rebuildWorkflowCategory(const QStringList& names, const QStringList& workflowIds, const QSet<QString>& runningWorkflowIds = {});
+    void rebuildTemplateCategory(const QStringList& names, const QStringList& templateIds);
+    void rebuildRunCategory(const QStringList& names, const QStringList& runIds);
 
     QLabel* m_workspaceLabel = nullptr;
     QTreeWidget* m_tree = nullptr;
     QTreeWidgetItem* m_workflowsItem = nullptr;
     QTreeWidgetItem* m_templatesItem = nullptr;
     QTreeWidgetItem* m_runsItem = nullptr;
+    QPoint m_dragStartPosition;
 };
 
 } // namespace vws::ui

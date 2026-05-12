@@ -1,5 +1,6 @@
 #include "ui/output/OutputPanel.h"
 
+#include "domain/RunRecord.h"
 #include "execution/ExecutionEngine.h"
 #include "ui/editor/PythonCodeEditor.h"
 
@@ -23,10 +24,21 @@ namespace {
 
 constexpr int ArtifactPreviewRows = 8;
 constexpr qsizetype MaxPreviewCharacters = 2400;
+constexpr qsizetype MaxTableCellCharacters = 1200;
+constexpr qsizetype MaxAutoResizeCharacters = 240;
 
 QString compactJson(const QJsonObject& object)
 {
     return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+QString tableCellPreview(const QString& text)
+{
+    if (text.size() <= MaxTableCellCharacters) {
+        return text;
+    }
+
+    return text.left(MaxTableCellCharacters) + QStringLiteral("\n...");
 }
 
 } // namespace
@@ -50,7 +62,6 @@ void OutputPanel::clearRun()
     m_debugOutputView->clear();
     m_stderrView->clear();
     m_tracebackView->clear();
-    m_outputJsonView->clear();
 }
 
 void OutputPanel::setWorkflowName(const QString& workflowName)
@@ -83,7 +94,6 @@ void OutputPanel::recordNodeOutput(const QString& runId, const QString& nodeId, 
 
     const auto row = ensureNodeRunRow(nodeId);
     setCell(m_nodeRunTable, row, 4, compactJson(outputs));
-    showOutputJson(QString::fromUtf8(QJsonDocument(outputs).toJson(QJsonDocument::Indented)));
 }
 
 void OutputPanel::recordNodeError(const QString& runId, const QString& nodeId, const QString& message)
@@ -125,7 +135,6 @@ void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& 
         setCell(m_nodeRunTable, row, 1, it.value());
     }
 
-    QJsonObject allOutputs;
     QList<domain::Artifact> artifacts;
     for (auto it = result.nodeResults.cbegin(); it != result.nodeResults.cend(); ++it) {
         const auto& nodeId = it.key();
@@ -146,14 +155,46 @@ void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& 
         if (!nodeResult.errorStack.trimmed().isEmpty()) {
             appendTraceback(QString("[%1]\n%2").arg(nodeDisplayName, nodeResult.errorStack));
         }
-        allOutputs.insert(nodeDisplayName, nodeResult.outputs);
         artifacts.append(nodeResult.artifacts);
     }
 
-    if (!allOutputs.isEmpty()) {
-        showOutputJson(QString::fromUtf8(QJsonDocument(allOutputs).toJson(QJsonDocument::Indented)));
-    }
     showArtifacts(artifacts);
+}
+
+void OutputPanel::showRunRecord(
+    const domain::RunRecord& record,
+    const QHash<QString, QJsonObject>& nodeOutputsByNodeId)
+{
+    Q_UNUSED(nodeOutputsByNodeId);
+
+    appendTimelineRow(record.id, tr("Workflow"), displayWorkflowName(record.id), record.status);
+
+    for (const auto& nodeRun : record.nodeRuns) {
+        const auto row = ensureNodeRunRow(nodeRun.nodeId);
+        setCell(m_nodeRunTable, row, 1, nodeRun.status);
+        setCell(m_nodeRunTable, row, 2, nodeRun.finishedAt);
+
+        QJsonObject outputObject;
+        QFile outputFile(nodeRun.outputPath);
+        QJsonObject outputFileObj;
+        if (outputFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const auto doc = QJsonDocument::fromJson(outputFile.readAll());
+            if (doc.isObject()) {
+                outputFileObj = doc.object();
+                const auto outputs = outputFileObj.value("outputs").toObject();
+                setCell(m_nodeRunTable, row, 4, compactJson(outputs));
+            }
+        }
+
+        if (!nodeRun.status.trimmed().toLower().contains("succeeded")) {
+            const auto errorText = outputFileObj.value("error").toString();
+            if (!errorText.isEmpty()) {
+                setCell(m_nodeRunTable, row, 5, errorText);
+            }
+        }
+    }
+
+    showArtifacts(record.artifacts);
 }
 
 void OutputPanel::appendStdout(const QString& text)
@@ -181,13 +222,6 @@ void OutputPanel::appendTraceback(const QString& text)
 {
     if (m_tracebackView != nullptr && !text.isEmpty()) {
         m_tracebackView->appendPlainText(text);
-    }
-}
-
-void OutputPanel::showOutputJson(const QString& text)
-{
-    if (m_outputJsonView != nullptr) {
-        m_outputJsonView->setPlainText(text);
     }
 }
 
@@ -275,8 +309,26 @@ void OutputPanel::buildUi()
     m_nodeRunTable = new QTableWidget(0, 6, this);
     m_nodeRunTable->setObjectName(QStringLiteral("nodeRunTable"));
     m_nodeRunTable->setHorizontalHeaderLabels({tr("Node"), tr("Status"), tr("Updated"), tr("Debug"), tr("Output"), tr("Error")});
-    m_nodeRunTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     setupTable(m_nodeRunTable);
+    auto* nodeRunHeader = m_nodeRunTable->horizontalHeader();
+    nodeRunHeader->setStretchLastSection(false);
+    nodeRunHeader->setMinimumSectionSize(72);
+    nodeRunHeader->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    nodeRunHeader->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    nodeRunHeader->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    nodeRunHeader->setSectionResizeMode(3, QHeaderView::Interactive);
+    nodeRunHeader->setSectionResizeMode(4, QHeaderView::Stretch);
+    nodeRunHeader->setSectionResizeMode(5, QHeaderView::Interactive);
+    m_nodeRunTable->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_nodeRunTable->setColumnWidth(3, 220);
+    m_nodeRunTable->setColumnWidth(4, 360);
+    m_nodeRunTable->setColumnWidth(5, 260);
+    for (int column = 0; column < m_nodeRunTable->columnCount(); ++column) {
+        auto* item = m_nodeRunTable->horizontalHeaderItem(column);
+        if (item != nullptr) {
+            item->setTextAlignment(Qt::AlignCenter);
+        }
+    }
 
     m_threadTraceTable = new QTableWidget(0, 6, this);
     m_threadTraceTable->setObjectName(QStringLiteral("threadTraceTable"));
@@ -308,12 +360,6 @@ void OutputPanel::buildUi()
     m_tracebackView->setProperty("readOnly", true);
     m_tracebackView->setPlaceholderText(tr("tracebacks will appear here"));
 
-    m_outputJsonView = new QPlainTextEdit(this);
-    m_outputJsonView->setObjectName(QStringLiteral("outputJsonView"));
-    m_outputJsonView->setReadOnly(true);
-    m_outputJsonView->setProperty("readOnly", true);
-    m_outputJsonView->setPlaceholderText(tr("output JSON will appear here"));
-
     m_artifactTable = new QTableWidget(0, 5, this);
     m_artifactTable->setObjectName(QStringLiteral("artifactTable"));
     m_artifactTable->setHorizontalHeaderLabels({tr("Node"), tr("Type"), tr("Path"), tr("Size"), tr("Preview")});
@@ -329,7 +375,6 @@ void OutputPanel::buildUi()
     tabs->addTab(m_debugOutputView, tr("Debug Output"));
     tabs->addTab(m_stderrView, tr("stderr"));
     tabs->addTab(m_tracebackView, tr("Traceback"));
-    tabs->addTab(m_outputJsonView, tr("Output JSON"));
     tabs->addTab(m_artifactTable, tr("Artifacts"));
 
     auto* layout = new QVBoxLayout(this);
@@ -396,8 +441,11 @@ void OutputPanel::setCell(QTableWidget* table, int row, int column, const QStrin
         item = new QTableWidgetItem();
         table->setItem(row, column, item);
     }
-    item->setText(text);
-    table->resizeColumnToContents(column);
+    item->setText(tableCellPreview(text));
+    item->setToolTip(text);
+    if (text.size() <= MaxAutoResizeCharacters) {
+        table->resizeColumnToContents(column);
+    }
     table->resizeRowToContents(row);
 }
 

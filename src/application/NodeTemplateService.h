@@ -23,6 +23,11 @@ public:
     bool loadTemplate(const QString& filePath, domain::NodeTemplate& nodeTemplate, QString* errorMessage = nullptr) const;
     QList<domain::NodeTemplate> listTemplates(const QString& workspaceRootPath, QString* errorMessage = nullptr) const;
     bool importTemplateFile(const QString& sourceFilePath, const QString& targetWorkspaceRootPath, domain::NodeTemplate& importedTemplate, QString* errorMessage = nullptr) const;
+    bool loadTemplateFromWorkspace(
+        const QString& workspaceRootPath,
+        const QString& templateId,
+        domain::NodeTemplate& nodeTemplate,
+        QString* errorMessage = nullptr) const;
 };
 
 } // namespace vws::application

@@ -60,6 +60,7 @@ int main(int argc, char* argv[])
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
+                3,
                 "background",
                 "task",
                 vws::ui::DataTransferTemplate::FileToFile).contains("\"https://example.test/v1\""),
@@ -70,6 +71,7 @@ int main(int argc, char* argv[])
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
+                3,
                 "background",
                 "task",
                 vws::ui::DataTransferTemplate::FileToFile).contains("input_mode = \"file\"")
@@ -77,6 +79,7 @@ int main(int argc, char* argv[])
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
+                3,
                 "background",
                 "task",
                 vws::ui::DataTransferTemplate::FileToFile).contains("output_mode = \"file\""),
@@ -87,6 +90,7 @@ int main(int argc, char* argv[])
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
+                3,
                 "background",
                 "task",
                 vws::ui::DataTransferTemplate::FileToData).contains("file_text = file.read()")
@@ -94,6 +98,7 @@ int main(int argc, char* argv[])
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
+                3,
                 "background",
                 "task",
                 vws::ui::DataTransferTemplate::FileToData).contains("\"content\": file_text"),
@@ -110,9 +115,53 @@ int main(int argc, char* argv[])
             "File function template should read an upstream path and register an artifact")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("output.csv")
-            && vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::FileToData).contains("csv.DictReader"),
-            "Function templates should cover data-to-file and file-to-data flows")) {
+    if (const auto check = expect(vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("file_type = \"\"")
+            && vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("file_name = \"output\"")
+            && !vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("output_path = artifact_dir / \"output.csv\""),
+            "Data-to-file template should use generic file_name without .csv as default output path")) {
+        return check;
+    }
+    if (const auto check = expect(vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::FileToData).contains("source_format")
+            && !vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::FileToData).contains("\"format\": input_data.get(\"format\", \"csv\")"),
+            "File-to-data template should not default to CSV format")) {
+        return check;
+    }
+    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentUrl().isEmpty()
+            && vws::ui::PythonCodeTemplates::defaultAgentModel().isEmpty()
+            && !vws::ui::PythonCodeTemplates::agentUrlPlaceholder().isEmpty()
+            && !vws::ui::PythonCodeTemplates::agentModelPlaceholder().isEmpty(),
+            "Agent URL/model defaults should be empty and placeholders non-empty")) {
+        return check;
+    }
+    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentMaxRetries() == 3,
+            "Default agent max retries should be 3")) {
+        return check;
+    }
+    const auto agentCode = vws::ui::PythonCodeTemplates::agentCode(
+        "https://example.test/v1", "model-x", "key-x", 3,
+        "background", "task", vws::ui::DataTransferTemplate::DataToData);
+    if (const auto check = expect(agentCode.contains("max_retries"),
+            "Agent template should contain max_retries")) {
+        return check;
+    }
+    if (const auto check = expect(agentCode.contains("retry_count"),
+            "Agent template should contain retry_count")) {
+        return check;
+    }
+    if (const auto check = expect(agentCode.contains("for attempt_index in range(max_retries + 1)"),
+            "Agent template should contain retry loop")) {
+        return check;
+    }
+    if (const auto check = expect(agentCode.contains("Agent request failed after"),
+            "Agent template should have retry exhaustion error")) {
+        return check;
+    }
+    if (const auto check = expect(agentCode.contains("_sleep_before_retry"),
+            "Agent template should define _sleep_before_retry helper")) {
+        return check;
+    }
+    if (const auto check = expect(agentCode.contains("_post_chat_completion"),
+            "Agent template should define _post_chat_completion helper")) {
         return check;
     }
 
@@ -127,6 +176,7 @@ int main(int argc, char* argv[])
     vws::ui::PythonNodeEditorDialog agentDialog(
         "Agent",
         "Calls a model",
+        300000,
         "agent",
         {{"io_template", "data_to_data"}},
         "def run(inputs, context):\n    return {\"outputs\": {\"output\": {\"custom\": True}}, \"artifacts\": []}\n",
@@ -142,7 +192,7 @@ int main(int argc, char* argv[])
         &agentDialog,
         &vws::ui::PythonNodeEditorDialog::nodeSaved,
         &agentDialog,
-        [&savedAgentCode](const QString&, const QString&, const QString& code, const QJsonObject&) {
+        [&savedAgentCode](const QString&, const QString&, int, const QString& code, const QJsonObject&) {
             savedAgentCode = code;
         });
     agentEditor->setCode(customAgentCode);
@@ -219,6 +269,21 @@ int main(int argc, char* argv[])
     }
     if (const auto check = expect(workflow.nodes.first().config.value("agent_model").toString() == "model-x",
             "Agent config patch should persist model name")) {
+        return check;
+    }
+    if (const auto check = expect(workflowService.updateNodeDetails(
+                workflow,
+                "node-1",
+                "Agent",
+                "Calls a model",
+                "agent-code",
+                {{"agent_max_retries", 5}},
+                &errorMessage),
+            "WorkflowService should merge agent_max_retries config field")) {
+        return check;
+    }
+    if (const auto check = expect(workflow.nodes.first().config.value("agent_max_retries").toInt() == 5,
+            "Agent config patch should persist max request retries")) {
         return check;
     }
 

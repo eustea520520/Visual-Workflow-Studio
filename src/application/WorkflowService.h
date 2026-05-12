@@ -31,6 +31,16 @@ public:
         const QString& nodeId,
         const QString& name,
         const QString& description,
+        int timeoutMs,
+        const QString& code,
+        const QJsonObject& configPatch,
+        QString* errorMessage = nullptr) const;
+
+    bool updateNodeDetails(
+        domain::Workflow& workflow,
+        const QString& nodeId,
+        const QString& name,
+        const QString& description,
         const QString& code,
         const QJsonObject& configPatch,
         QString* errorMessage = nullptr) const;
