@@ -1,4 +1,5 @@
 #include "ui/canvas/NodeGraphicsItem.h"
+#include "ui/canvas/CanvasZ.h"
 #include "ui/theme/ThemeManager.h"
 
 #include <QFont>
@@ -31,7 +32,7 @@ NodeGraphicsItem::NodeGraphicsItem(domain::Node node, QGraphicsItem* parent)
     setPos(m_node.position.x, m_node.position.y);
     setFlags(ItemIsMovable | ItemIsSelectable | ItemSendsGeometryChanges | ItemIsFocusable);
     setAcceptHoverEvents(true);
-    setZValue(10.0);
+    setZValue(CanvasZ::Node);
     setToolTip(m_node.description.trimmed().isEmpty()
             ? m_node.name
             : QString("%1\n\n%2").arg(m_node.name, m_node.description));

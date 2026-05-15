@@ -12,7 +12,6 @@ CommandBar::CommandBar(QWidget* parent)
     : QFrame(parent)
 {
     setObjectName(QStringLiteral("CommandBar"));
-    setProperty("panel", true);
 
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(14, 8, 14, 8);

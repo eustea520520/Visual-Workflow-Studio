@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/workspace/WorkspaceExplorerViewModel.h"
+
 #include <QSet>
 #include <QStringList>
 #include <QWidget>
@@ -20,15 +22,7 @@ class WorkspaceExplorer final : public QWidget {
 public:
     explicit WorkspaceExplorer(QWidget* parent = nullptr);
 
-    void setWorkspaceData(
-        const QString& workspaceName,
-        const QStringList& workflowNames,
-        const QStringList& workflowIds,
-        const QStringList& templateNames,
-        const QStringList& templateIds = {},
-        const QStringList& runNames = {},
-        const QStringList& runIds = {},
-        const QSet<QString>& runningWorkflowIds = {});
+    void render(const WorkspaceExplorerViewModel& viewModel);
 
 signals:
     void workflowActivated(const QString& workflowId);
@@ -40,9 +34,9 @@ protected:
 private:
     void buildUi();
     void rebuildCategory(QTreeWidgetItem* rootItem, const QStringList& names, const QString& emptyText);
-    void rebuildWorkflowCategory(const QStringList& names, const QStringList& workflowIds, const QSet<QString>& runningWorkflowIds = {});
-    void rebuildTemplateCategory(const QStringList& names, const QStringList& templateIds);
-    void rebuildRunCategory(const QStringList& names, const QStringList& runIds);
+    void rebuildWorkflowCategory(const QList<WorkspaceExplorerItemViewModel>& workflows);
+    void rebuildTemplateCategory(const QList<WorkspaceExplorerItemViewModel>& templates);
+    void rebuildRunCategory(const QList<WorkspaceExplorerItemViewModel>& runs);
 
     QLabel* m_workspaceLabel = nullptr;
     QTreeWidget* m_tree = nullptr;

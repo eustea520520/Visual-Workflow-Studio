@@ -51,6 +51,12 @@ OutputPanel::OutputPanel(QWidget* parent)
     buildUi();
 }
 
+void OutputPanel::render(const OutputPanelViewModel& viewModel)
+{
+    m_workflowName = viewModel.workflowName;
+    m_nodeNames = viewModel.nodeNamesById;
+}
+
 void OutputPanel::clearRun()
 {
     m_timelineTable->setRowCount(0);
@@ -62,16 +68,6 @@ void OutputPanel::clearRun()
     m_debugOutputView->clear();
     m_stderrView->clear();
     m_tracebackView->clear();
-}
-
-void OutputPanel::setWorkflowName(const QString& workflowName)
-{
-    m_workflowName = workflowName;
-}
-
-void OutputPanel::setNodeNames(const QHash<QString, QString>& nodeNames)
-{
-    m_nodeNames = nodeNames;
 }
 
 void OutputPanel::recordWorkflowStatus(const QString& runId, const QString& status)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Node.h"
+#include "ui/inspector/NodeInspectorViewModel.h"
 
 #include <QJsonObject>
 #include <QString>
@@ -21,6 +22,7 @@ class NodeInspector final : public QWidget {
 public:
     explicit NodeInspector(QWidget* parent = nullptr);
 
+    void render(const NodeInspectorViewModel& viewModel);
     void displayNode(const domain::Node& node);
     void displayNode(const domain::Node& node, const QJsonObject& selectedNodeOutput);
     void clearSelectedNodeOutput();

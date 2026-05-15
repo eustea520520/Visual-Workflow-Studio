@@ -33,8 +33,7 @@ int main(int argc, char* argv[])
     // Verify timeline rows, node result rows, artifacts, previews, and thread trace display.
     vws::ui::OutputPanel panel;
     panel.clearRun();
-    panel.setWorkflowName("Demo Workflow");
-    panel.setNodeNames({{"node-a", "Calculator"}});
+    panel.render({"Demo Workflow", {{"node-a", "Calculator"}}});
     panel.recordWorkflowStatus("run-1", "Running");
     panel.recordNodeStatus("run-1", "node-a", "Queued");
     panel.recordNodeStatus("run-1", "node-a", "Running");

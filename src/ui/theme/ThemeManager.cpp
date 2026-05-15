@@ -10,6 +10,22 @@ namespace vws::ui {
 
 ThemeManager* ThemeManager::s_instance = nullptr;
 
+namespace {
+
+QString qssColorValue(const QColor& color)
+{
+    if (color.alpha() < 255) {
+        return QStringLiteral("rgba(%1, %2, %3, %4)")
+            .arg(color.red())
+            .arg(color.green())
+            .arg(color.blue())
+            .arg(color.alpha());
+    }
+    return color.name(QColor::HexRgb);
+}
+
+} // namespace
+
 ThemeManager::ThemeManager(QObject* parent)
     : QObject(parent)
 {
@@ -28,7 +44,7 @@ void ThemeManager::applyTheme(AppTheme theme)
         ? QStringLiteral(":/styles/light.qss")
         : QStringLiteral(":/styles/dark.qss");
 
-    const auto qss = loadStyleSheet(resourcePath);
+    const auto qss = renderStyleSheet(loadStyleSheet(resourcePath));
     if (qApp != nullptr) {
         qApp->setStyleSheet(qss);
 
@@ -96,6 +112,15 @@ QString ThemeManager::loadStyleSheet(const QString& resourcePath) const
 
     QTextStream stream(&file);
     return stream.readAll();
+}
+
+QString ThemeManager::renderStyleSheet(QString styleSheet) const
+{
+    const auto& tokens = m_currentTheme == AppTheme::Light ? m_lightColors : m_darkColors;
+    for (auto it = tokens.cbegin(); it != tokens.cend(); ++it) {
+        styleSheet.replace(QStringLiteral("${%1}").arg(it.key()), qssColorValue(it.value()));
+    }
+    return styleSheet;
 }
 
 void ThemeManager::buildColorMaps()

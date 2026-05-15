@@ -4,6 +4,7 @@
 #include "application/PythonCodeTemplates.h"
 #include "domain/NodeConfigView.h"
 #include "domain/NodeTypes.h"
+#include "ui/theme/UiMetrics.h"
 
 #include <QColor>
 #include <QFormLayout>
@@ -23,7 +24,7 @@ namespace NodeTypes = domain::NodeTypes;
 NodeInspector::NodeInspector(QWidget* parent)
     : QWidget(parent)
 {
-    setObjectName(QStringLiteral("inspector"));
+    setObjectName(QStringLiteral("nodeInspector"));
     setProperty("panel", true);
     buildUi();
 }
@@ -35,17 +36,47 @@ void NodeInspector::displayNode(const domain::Node& node)
 
 void NodeInspector::displayNode(const domain::Node& node, const QJsonObject& selectedNodeOutput)
 {
-    m_currentNodeId = node.nodeId;
     const domain::NodeConfigView config(node.config);
+    NodeInspectorViewModel viewModel;
+    viewModel.nodeId = node.nodeId;
+    viewModel.code = config.code();
+    viewModel.showAgentTab = node.type.trimmed().toLower() == NodeTypes::Agent;
+    viewModel.focusAgentTab = viewModel.showAgentTab;
+    viewModel.agent.title = node.name;
+    viewModel.agent.description = node.description;
+    viewModel.agent.timeoutMs = QString::number(node.runtime.timeoutMs);
+    viewModel.agent.ioTemplate = config.ioTemplate();
+    viewModel.agent.url = config.agentUrl();
+    viewModel.agent.modelName = config.agentModel();
+    viewModel.agent.apiKey = config.agentApiKey();
+    viewModel.agent.maxRetries = QString::number(
+        config.agentMaxRetries(PythonCodeTemplates::defaultAgentMaxRetries()));
+    viewModel.agent.backgroundPrompt = config.agentBackgroundPrompt(
+        PythonCodeTemplates::defaultAgentBackgroundPrompt());
+    viewModel.agent.taskPrompt = config.agentTaskPrompt(
+        PythonCodeTemplates::defaultAgentTaskPrompt());
+
+    if (selectedNodeOutput.isEmpty()) {
+        viewModel.outputJsonText = tr("No Output JSON is available for this selected node yet.");
+    } else {
+        viewModel.outputJsonText = QString::fromUtf8(
+            QJsonDocument(selectedNodeOutput).toJson(QJsonDocument::Indented));
+    }
+
+    render(viewModel);
+}
+
+void NodeInspector::render(const NodeInspectorViewModel& viewModel)
+{
+    m_currentNodeId = viewModel.nodeId;
 
     if (m_pythonEditor != nullptr) {
-        const auto nextCode = config.code();
-        if (m_pythonEditor->code() != nextCode) {
-            m_pythonEditor->setCode(nextCode);
+        if (m_pythonEditor->code() != viewModel.code) {
+            m_pythonEditor->setCode(viewModel.code);
         }
     }
 
-    if (node.type.trimmed().toLower() != NodeTypes::Agent) {
+    if (!viewModel.showAgentTab) {
         if (m_tabs != nullptr) {
             m_tabs->setTabEnabled(1, false);
             m_tabs->setCurrentIndex(0);
@@ -53,30 +84,24 @@ void NodeInspector::displayNode(const domain::Node& node, const QJsonObject& sel
     } else {
         if (m_tabs != nullptr) {
             m_tabs->setTabEnabled(1, true);
-            m_tabs->setCurrentIndex(1);
+            if (viewModel.focusAgentTab) {
+                m_tabs->setCurrentIndex(1);
+            }
         }
-        m_agentTitleEdit->setText(node.name);
-        m_agentDescriptionEdit->setText(node.description);
-        m_agentTimeoutEdit->setText(QString::number(node.runtime.timeoutMs));
-        m_agentTemplateEdit->setText(config.ioTemplate());
-        m_agentUrlEdit->setText(config.agentUrl());
-        m_agentModelEdit->setText(config.agentModel());
-        m_agentApiKeyEdit->setText(config.agentApiKey());
-        m_agentMaxRetriesEdit->setText(QString::number(
-            config.agentMaxRetries(PythonCodeTemplates::defaultAgentMaxRetries())));
-        m_agentBackgroundPromptEdit->setPlainText(config.agentBackgroundPrompt(
-            PythonCodeTemplates::defaultAgentBackgroundPrompt()));
-        m_agentTaskPromptEdit->setPlainText(config.agentTaskPrompt(
-            PythonCodeTemplates::defaultAgentTaskPrompt()));
+        m_agentTitleEdit->setText(viewModel.agent.title);
+        m_agentDescriptionEdit->setText(viewModel.agent.description);
+        m_agentTimeoutEdit->setText(viewModel.agent.timeoutMs);
+        m_agentTemplateEdit->setText(viewModel.agent.ioTemplate);
+        m_agentUrlEdit->setText(viewModel.agent.url);
+        m_agentModelEdit->setText(viewModel.agent.modelName);
+        m_agentApiKeyEdit->setText(viewModel.agent.apiKey);
+        m_agentMaxRetriesEdit->setText(viewModel.agent.maxRetries);
+        m_agentBackgroundPromptEdit->setPlainText(viewModel.agent.backgroundPrompt);
+        m_agentTaskPromptEdit->setPlainText(viewModel.agent.taskPrompt);
     }
 
-    if (selectedNodeOutput.isEmpty()) {
-        m_outputJsonEditor->setPlainText(
-            tr("No Output JSON is available for this selected node yet."));
-    } else {
-        m_outputJsonEditor->setPlainText(
-            QString::fromUtf8(
-                QJsonDocument(selectedNodeOutput).toJson(QJsonDocument::Indented)));
+    if (m_outputJsonEditor != nullptr) {
+        m_outputJsonEditor->setPlainText(viewModel.outputJsonText);
     }
 }
 
@@ -151,9 +176,11 @@ void NodeInspector::buildUi()
     m_agentApiKeyEdit->setEchoMode(QLineEdit::Password);
     m_agentMaxRetriesEdit = new QLineEdit(agentPanel);
     m_agentBackgroundPromptEdit = new QPlainTextEdit(agentPanel);
-    m_agentBackgroundPromptEdit->setFixedHeight(72);
+    m_agentBackgroundPromptEdit->setMinimumHeight(72);
+    m_agentBackgroundPromptEdit->setMaximumHeight(140);
     m_agentTaskPromptEdit = new QPlainTextEdit(agentPanel);
-    m_agentTaskPromptEdit->setFixedHeight(72);
+    m_agentTaskPromptEdit->setMinimumHeight(72);
+    m_agentTaskPromptEdit->setMaximumHeight(140);
 
     setReadOnly(m_agentTitleEdit);
     setReadOnly(m_agentDescriptionEdit);
@@ -195,8 +222,12 @@ void NodeInspector::buildUi()
     m_tabs->setTabEnabled(1, false);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(10);
+    layout->setContentsMargins(
+        UiMetrics::PanelMargin,
+        UiMetrics::PanelMargin,
+        UiMetrics::PanelMargin,
+        UiMetrics::PanelMargin);
+    layout->setSpacing(UiMetrics::PanelSpacing);
     layout->addWidget(title);
     layout->addWidget(m_tabs, 1);
 }

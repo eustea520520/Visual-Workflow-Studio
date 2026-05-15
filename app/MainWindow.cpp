@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 
 #include "AppContext.h"
+#include "application/NodeFactory.h"
+#include "application/PythonCodeTemplates.h"
 #include "domain/NodeTemplate.h"
 #include "domain/NodeConfigView.h"
 #include "domain/NodeTypes.h"
@@ -14,20 +16,21 @@
 #include "presentation/state/AppStore.h"
 #include "ui/canvas/WorkflowCanvas.h"
 #include "ui/editor/PythonNodeEditorDialog.h"
-#include "application/PythonCodeTemplates.h"
 #include "ui/inspector/NodeInspector.h"
+#include "ui/main/MainWindowLayoutBuilder.h"
 #include "ui/output/OutputPanel.h"
+#include "ui/output/OutputPanelViewModel.h"
 #include "ui/theme/ThemeManager.h"
 #include "ui/widgets/CommandBar.h"
-#include "ui/widgets/IconSquareButton.h"
+#include "ui/widgets/EmptyStateOverlay.h"
 #include "ui/workspace/WorkspaceExplorer.h"
+#include "ui/workspace/WorkspaceExplorerViewModel.h"
 
 #include <QAction>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHash>
-#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -36,17 +39,45 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QScopedValueRollback>
-#include <QSplitter>
-#include <QStackedLayout>
 #include <QStatusBar>
 #include <QTimer>
-#include <QVBoxLayout>
 
 namespace vws {
 
 namespace NodeTypes = domain::NodeTypes;
+
+namespace {
+
+application::NodeFactory::StarterTemplateKind toApplicationStarterTemplate(ui::StarterNodeTemplate templateKind)
+{
+    switch (templateKind) {
+    case ui::StarterNodeTemplate::EmptyOutput:
+        return application::NodeFactory::StarterTemplateKind::EmptyOutput;
+    case ui::StarterNodeTemplate::FileOutput:
+        return application::NodeFactory::StarterTemplateKind::FileOutput;
+    case ui::StarterNodeTemplate::DataOutput:
+    default:
+        return application::NodeFactory::StarterTemplateKind::DataOutput;
+    }
+}
+
+application::DataTransferTemplate toApplicationDataTransferTemplate(ui::DataTransferNodeTemplate templateKind)
+{
+    switch (templateKind) {
+    case ui::DataTransferNodeTemplate::DataToFile:
+        return application::DataTransferTemplate::DataToFile;
+    case ui::DataTransferNodeTemplate::FileToData:
+        return application::DataTransferTemplate::FileToData;
+    case ui::DataTransferNodeTemplate::FileToFile:
+        return application::DataTransferTemplate::FileToFile;
+    case ui::DataTransferNodeTemplate::DataToData:
+    default:
+        return application::DataTransferTemplate::DataToData;
+    }
+}
+
+} // namespace
 
 MainWindow::MainWindow(AppContext& appContext, QWidget* parent)
     : QMainWindow(parent)
@@ -110,20 +141,27 @@ void MainWindow::buildLayout()
     ui::ThemeManager::setInstance(m_themeManager);
     connect(m_toggleThemeAction, &QAction::triggered, m_themeManager, &ui::ThemeManager::toggleTheme);
 
-    // Main panels are independent widgets; MainWindow only wires them together.
-    m_workspaceExplorer = new ui::WorkspaceExplorer(this);
-    m_workflowCanvas = new ui::WorkflowCanvas(this);
-    m_nodeInspector = new ui::NodeInspector(this);
-    m_outputPanel = new ui::OutputPanel(this);
-    m_canvasOverlay = buildCanvasOverlay();
-
-    auto* canvasHost = new QWidget(this);
-    canvasHost->setObjectName(QStringLiteral("canvasHost"));
-    auto* canvasStack = new QStackedLayout(canvasHost);
-    canvasStack->setStackingMode(QStackedLayout::StackAll);
-    canvasStack->setContentsMargins(0, 0, 0, 0);
-    canvasStack->addWidget(m_workflowCanvas);
-    canvasStack->addWidget(m_canvasOverlay);
+    const ui::MainWindowLayoutBuilder layoutBuilder(this);
+    const auto layout = layoutBuilder.build({
+        m_newWorkspaceAction,
+        m_openWorkspaceAction,
+        m_selectPythonAction,
+        m_newWorkflowAction,
+        m_saveWorkflowAction,
+        m_saveTemplateAction,
+        m_connectNodesAction,
+        m_importTemplateAction,
+        m_runAction,
+        m_cancelRunAction,
+        m_toggleThemeAction,
+    });
+    m_commandBar = layout.commandBar;
+    m_workspaceExplorer = layout.workspaceExplorer;
+    m_workflowCanvas = layout.workflowCanvas;
+    m_nodeInspector = layout.nodeInspector;
+    m_outputPanel = layout.outputPanel;
+    m_canvasOverlay = layout.canvasOverlay;
+    setCentralWidget(layout.centralWidget);
 
     // UI widgets emit intent; application services and the execution engine do the work.
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeSelected, this, [this](const domain::Node& node) {
@@ -150,6 +188,31 @@ void MainWindow::buildLayout()
     });
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowActivated, this, &MainWindow::openWorkflowById);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::runActivated, this, &MainWindow::openRunById);
+    connect(m_canvasOverlay, &ui::EmptyStateOverlay::createWorkspaceRequested, this, &MainWindow::createWorkspace);
+    connect(m_canvasOverlay, &ui::EmptyStateOverlay::openWorkspaceRequested, this, &MainWindow::openWorkspace);
+    connect(m_canvasOverlay, &ui::EmptyStateOverlay::createWorkflowRequested, this, &MainWindow::createWorkflow);
+    connect(m_canvasOverlay, &ui::EmptyStateOverlay::openWorkflowRequested, this, &MainWindow::loadWorkflow);
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::starterNodeRequested, this,
+        [this](const QPointF& scenePos, ui::StarterNodeTemplate templateKind) {
+            m_workflowCanvas->addNode(application::NodeFactory::createStarterNode(
+                scenePos,
+                m_workflowCanvas->workflow().nodes.size(),
+                toApplicationStarterTemplate(templateKind)));
+        });
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::functionNodeRequested, this,
+        [this](const QPointF& scenePos, ui::DataTransferNodeTemplate templateKind) {
+            m_workflowCanvas->addNode(application::NodeFactory::createFunctionNode(
+                scenePos,
+                m_workflowCanvas->workflow().nodes.size(),
+                toApplicationDataTransferTemplate(templateKind)));
+        });
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::agentNodeRequested, this,
+        [this](const QPointF& scenePos, ui::DataTransferNodeTemplate templateKind) {
+            m_workflowCanvas->addNode(application::NodeFactory::createAgentNode(
+                scenePos,
+                m_workflowCanvas->workflow().nodes.size(),
+                toApplicationDataTransferTemplate(templateKind)));
+        });
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeTemplateDropped,
         this, &MainWindow::addNodeFromTemplateIdAt);
     connect(&m_appContext.runController(), &presentation::RunController::nodeStatusChanged, this,
@@ -202,37 +265,6 @@ void MainWindow::buildLayout()
         updateCanvasOverlay();
     });
 
-    // Compact icon command bar replaces the earlier text-heavy toolbar.
-    buildCommandBar();
-
-    // Splitters keep the workspace browser, canvas, inspector, and output panel resizable.
-    auto* horizontalSplitter = new QSplitter(Qt::Horizontal, this);
-    horizontalSplitter->setObjectName(QStringLiteral("mainHorizontalSplitter"));
-    horizontalSplitter->addWidget(m_workspaceExplorer);
-    horizontalSplitter->addWidget(canvasHost);
-    horizontalSplitter->addWidget(m_nodeInspector);
-    horizontalSplitter->setStretchFactor(0, 0);
-    horizontalSplitter->setStretchFactor(1, 1);
-    horizontalSplitter->setStretchFactor(2, 0);
-    horizontalSplitter->setSizes({280, 880, 340});
-
-    auto* verticalSplitter = new QSplitter(Qt::Vertical, this);
-    verticalSplitter->setObjectName(QStringLiteral("mainVerticalSplitter"));
-    verticalSplitter->addWidget(horizontalSplitter);
-    verticalSplitter->addWidget(m_outputPanel);
-    verticalSplitter->setStretchFactor(0, 1);
-    verticalSplitter->setStretchFactor(1, 0);
-    verticalSplitter->setSizes({650, 300});
-
-    auto* centralWrapper = new QWidget(this);
-    centralWrapper->setObjectName(QStringLiteral("centralWrapper"));
-    auto* centralLayout = new QVBoxLayout(centralWrapper);
-    centralLayout->setContentsMargins(0, 0, 0, 0);
-    centralLayout->setSpacing(0);
-    centralLayout->addWidget(m_commandBar);
-    centralLayout->addWidget(verticalSplitter, 1);
-    setCentralWidget(centralWrapper);
-
     // Status bar shows selected-node runtime info and the workspace Python interpreter.
     m_timeoutStatusLabel = new QLabel(tr("Timeout: -"), this);
     m_timeoutStatusLabel->setObjectName("timeoutStatus");
@@ -242,80 +274,9 @@ void MainWindow::buildLayout()
     statusBar()->addPermanentWidget(m_pythonStatusLabel, 1);
 }
 
-void MainWindow::buildCommandBar()
-{
-    m_commandBar = new ui::CommandBar(this);
-    m_commandBar->setWorkspaceInfo(tr("Visual Workflow Studio"));
-
-    m_commandBar->addActionButton(QIcon(":/icons/workspace-new.svg"),
-        m_newWorkspaceAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addActionButton(QIcon(":/icons/workspace-open.svg"),
-        m_openWorkspaceAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addActionButton(QIcon(":/icons/python.svg"),
-        m_selectPythonAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addSeparator();
-    m_commandBar->addActionButton(QIcon(":/icons/workflow-new.svg"),
-        m_newWorkflowAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addActionButton(QIcon(":/icons/save.svg"),
-        m_saveWorkflowAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addSeparator();
-    m_commandBar->addActionButton(QIcon(":/icons/template-save.svg"),
-        m_saveTemplateAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addActionButton(QIcon(":/icons/link.svg"),
-        m_connectNodesAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addActionButton(QIcon(":/icons/import.svg"),
-        m_importTemplateAction, ui::IconSquareButton::Role::Secondary);
-    m_commandBar->addSeparator();
-    m_commandBar->addActionButton(QIcon(":/icons/run.svg"),
-        m_runAction, ui::IconSquareButton::Role::Primary);
-    m_commandBar->addActionButton(QIcon(":/icons/stop.svg"),
-        m_cancelRunAction, ui::IconSquareButton::Role::Danger);
-
-    auto* themeButton = m_commandBar->addButton(
-        QIcon(":/icons/theme.svg"), tr("Toggle Light / Dark Theme"),
-        ui::IconSquareButton::Role::Ghost);
-    connect(themeButton, &QPushButton::clicked, m_themeManager, &ui::ThemeManager::toggleTheme);
-}
-
 void MainWindow::applyInitialTheme()
 {
     m_themeManager->applyTheme(ui::AppTheme::Light);
-}
-
-QWidget* MainWindow::buildCanvasOverlay()
-{
-    auto* overlay = new QWidget(this);
-    overlay->setObjectName("canvasOverlay");
-    overlay->setAutoFillBackground(true);
-    // Background color will be set by applyInitialTheme() and updated on theme change.
-    // QSS for this widget is not used; we set the palette directly for overlay transparency.
-
-    m_canvasOverlayTitle = new QLabel(overlay);
-    m_canvasOverlayTitle->setObjectName("canvasOverlayTitle");
-    m_canvasOverlayTitle->setAlignment(Qt::AlignCenter);
-
-    m_overlayPrimaryButton = new QPushButton(overlay);
-    m_overlayPrimaryButton->setObjectName("overlayPrimaryButton");
-    m_overlayPrimaryButton->setProperty("buttonRole", "primary");
-
-    m_overlaySecondaryButton = new QPushButton(overlay);
-    m_overlaySecondaryButton->setObjectName("overlaySecondaryButton");
-    m_overlaySecondaryButton->setProperty("buttonRole", "secondary");
-
-    auto* buttonLayout = new QHBoxLayout();
-    buttonLayout->addStretch(1);
-    buttonLayout->addWidget(m_overlayPrimaryButton);
-    buttonLayout->addWidget(m_overlaySecondaryButton);
-    buttonLayout->addStretch(1);
-
-    auto* layout = new QVBoxLayout(overlay);
-    layout->addStretch(1);
-    layout->addWidget(m_canvasOverlayTitle);
-    layout->addSpacing(12);
-    layout->addLayout(buttonLayout);
-    layout->addStretch(1);
-
-    return overlay;
 }
 
 void MainWindow::renderCurrentWorkflowOnCanvas()
@@ -344,29 +305,12 @@ void MainWindow::updateCanvasOverlay()
         return;
     }
 
-    // Update overlay background from theme (QSS handles the rest)
-    if (m_themeManager != nullptr) {
-        const auto overlayBg = m_themeManager->color("overlay-bg");
-        m_canvasOverlay->setStyleSheet(
-            QStringLiteral("QWidget#canvasOverlay { background: %1; }")
-                .arg(overlayBg.name(QColor::HexArgb)));
-    }
-
-    disconnect(m_overlayPrimaryButton, nullptr, this, nullptr);
-    disconnect(m_overlaySecondaryButton, nullptr, this, nullptr);
-
     if (m_store.currentWorkspace().rootPath.isEmpty()) {
-        m_canvasOverlayTitle->setText(tr("No workspace is open"));
-        m_overlayPrimaryButton->setText(tr("New Workspace"));
-        m_overlaySecondaryButton->setText(tr("Open Workspace"));
-        connect(m_overlayPrimaryButton, &QPushButton::clicked, this, &MainWindow::createWorkspace);
-        connect(m_overlaySecondaryButton, &QPushButton::clicked, this, &MainWindow::openWorkspace);
         if (m_commandBar != nullptr) {
             m_commandBar->setWorkspaceInfo(tr("Visual Workflow Studio"));
             m_commandBar->setWorkflowInfo(tr("No workspace"));
         }
-        m_canvasOverlay->show();
-        m_canvasOverlay->raise();
+        m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::NoWorkspace);
         return;
     }
 
@@ -375,16 +319,10 @@ void MainWindow::updateCanvasOverlay()
     }
 
     if (m_store.currentWorkflow().workflowId.isEmpty()) {
-        m_canvasOverlayTitle->setText(tr("No workflow is open"));
-        m_overlayPrimaryButton->setText(tr("New Workflow"));
-        m_overlaySecondaryButton->setText(tr("Open Workflow"));
-        connect(m_overlayPrimaryButton, &QPushButton::clicked, this, &MainWindow::createWorkflow);
-        connect(m_overlaySecondaryButton, &QPushButton::clicked, this, &MainWindow::loadWorkflow);
         if (m_commandBar != nullptr) {
             m_commandBar->setWorkflowInfo(tr("No workflow"));
         }
-        m_canvasOverlay->show();
-        m_canvasOverlay->raise();
+        m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::NoWorkflow);
         return;
     }
 
@@ -392,7 +330,7 @@ void MainWindow::updateCanvasOverlay()
         m_commandBar->setWorkflowInfo(m_store.currentWorkflow().name);
     }
 
-    m_canvasOverlay->hide();
+    m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::Hidden);
 }
 
 void MainWindow::createWorkspace()
@@ -618,8 +556,7 @@ void MainWindow::restoreRunRecordToUi(
     m_store.nodeOutputsByNodeId().clear();
     m_store.nodeOutputsByNodeId() = nodeOutputsByNodeId;
     const auto displayModel = presentation::WorkflowDisplayModelBuilder::build(m_store.currentWorkflow());
-    m_outputPanel->setWorkflowName(displayModel.workflowName);
-    m_outputPanel->setNodeNames(displayModel.nodeNamesById);
+    m_outputPanel->render({displayModel.workflowName, displayModel.nodeNamesById});
 
     for (const auto& nodeRun : record.nodeRuns) {
         m_workflowCanvas->setNodeStatus(nodeRun.nodeId, nodeRun.status);
@@ -802,8 +739,7 @@ void MainWindow::runCurrentWorkflow()
         m_nodeInspector->displayNode(selected.value(), {});
     }
     const auto displayModel = presentation::WorkflowDisplayModelBuilder::build(m_store.currentWorkflow());
-    m_outputPanel->setWorkflowName(displayModel.workflowName);
-    m_outputPanel->setNodeNames(displayModel.nodeNamesById);
+    m_outputPanel->render({displayModel.workflowName, displayModel.nodeNamesById});
 
     m_outputPanel->appendStdout(tr("Run started in background."));
 
@@ -908,15 +844,34 @@ void MainWindow::refreshWorkspaceExplorer()
         m_outputPanel->appendStderr(errorMessage);
     }
 
-    m_workspaceExplorer->setWorkspaceData(
-        snapshot.workspaceName,
-        snapshot.workflowNames,
-        snapshot.workflowIds,
-        snapshot.templateNames,
-        snapshot.templateIds,
-        snapshot.runNames,
-        snapshot.runIds,
-        snapshot.runningWorkflowIds);
+    ui::WorkspaceExplorerViewModel viewModel;
+    viewModel.workspaceName = snapshot.workspaceName;
+    for (int index = 0; index < snapshot.workflowNames.size(); ++index) {
+        ui::WorkspaceExplorerItemViewModel item;
+        item.name = snapshot.workflowNames.at(index);
+        if (index < snapshot.workflowIds.size()) {
+            item.id = snapshot.workflowIds.at(index);
+            item.running = snapshot.runningWorkflowIds.contains(item.id);
+        }
+        viewModel.workflows.append(item);
+    }
+    for (int index = 0; index < snapshot.templateNames.size(); ++index) {
+        ui::WorkspaceExplorerItemViewModel item;
+        item.name = snapshot.templateNames.at(index);
+        if (index < snapshot.templateIds.size()) {
+            item.id = snapshot.templateIds.at(index);
+        }
+        viewModel.templates.append(item);
+    }
+    for (int index = 0; index < snapshot.runNames.size(); ++index) {
+        ui::WorkspaceExplorerItemViewModel item;
+        item.name = snapshot.runNames.at(index);
+        if (index < snapshot.runIds.size()) {
+            item.id = snapshot.runIds.at(index);
+        }
+        viewModel.runs.append(item);
+    }
+    m_workspaceExplorer->render(viewModel);
 }
 
 void MainWindow::applyWorkspacePythonExecutable()

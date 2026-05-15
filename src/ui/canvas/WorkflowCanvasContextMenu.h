@@ -1,13 +1,23 @@
 #pragma once
 
-#include "application/NodeFactory.h"
-#include "application/PythonCodeTemplates.h"
-
 #include <QPoint>
 
 class QWidget;
 
 namespace vws::ui {
+
+enum class StarterNodeTemplate {
+    EmptyOutput,
+    DataOutput,
+    FileOutput,
+};
+
+enum class DataTransferNodeTemplate {
+    DataToData,
+    DataToFile,
+    FileToData,
+    FileToFile,
+};
 
 struct WorkflowCanvasContextAction {
     enum class Type {
@@ -20,10 +30,8 @@ struct WorkflowCanvasContextAction {
     };
 
     Type type = Type::None;
-    application::NodeFactory::StarterTemplateKind starterTemplate =
-        application::NodeFactory::StarterTemplateKind::DataOutput;
-    application::DataTransferTemplate dataTransferTemplate =
-        application::DataTransferTemplate::DataToData;
+    StarterNodeTemplate starterTemplate = StarterNodeTemplate::DataOutput;
+    DataTransferNodeTemplate dataTransferTemplate = DataTransferNodeTemplate::DataToData;
 };
 
 // Builds the canvas context menu and translates QAction selection into a small value object.

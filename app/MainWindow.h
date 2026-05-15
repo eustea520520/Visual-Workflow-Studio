@@ -11,7 +11,6 @@
 #include <QJsonObject>
 
 class QLabel;
-class QPushButton;
 class QWidget;
 
 namespace vws {
@@ -29,6 +28,7 @@ class OutputPanel;
 class ThemeManager;
 class WorkflowCanvas;
 class WorkspaceExplorer;
+class EmptyStateOverlay;
 }
 
 class MainWindow final : public QMainWindow {
@@ -38,8 +38,6 @@ public:
 private:
     void buildActions();
     void buildLayout();
-    void buildCommandBar();
-    QWidget* buildCanvasOverlay();
     void renderCurrentWorkflowOnCanvas();
     void clearCanvasWorkflowView();
     void updateCanvasOverlay();
@@ -81,10 +79,7 @@ private:
     ui::WorkflowCanvas* m_workflowCanvas = nullptr;
     ui::NodeInspector* m_nodeInspector = nullptr;
     ui::OutputPanel* m_outputPanel = nullptr;
-    QWidget* m_canvasOverlay = nullptr;
-    QLabel* m_canvasOverlayTitle = nullptr;
-    QPushButton* m_overlayPrimaryButton = nullptr;
-    QPushButton* m_overlaySecondaryButton = nullptr;
+    ui::EmptyStateOverlay* m_canvasOverlay = nullptr;
     QLabel* m_timeoutStatusLabel = nullptr;
     QLabel* m_pythonStatusLabel = nullptr;
     QAction* m_newWorkspaceAction = nullptr;

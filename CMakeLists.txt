@@ -112,12 +112,17 @@ set(WORKER_SOURCES
 )
 
 set(UI_SOURCES
+    src/ui/main/MainWindowLayoutBuilder.h src/ui/main/MainWindowLayoutBuilder.cpp
+    src/ui/workspace/WorkspaceExplorerViewModel.h
     src/ui/workspace/WorkspaceExplorer.h src/ui/workspace/WorkspaceExplorer.cpp
     src/ui/canvas/WorkflowCanvas.h src/ui/canvas/WorkflowCanvas.cpp
     src/ui/canvas/WorkflowCanvasContextMenu.h src/ui/canvas/WorkflowCanvasContextMenu.cpp
+    src/ui/canvas/WorkflowCanvasInteractionController.h src/ui/canvas/WorkflowCanvasInteractionController.cpp
     src/ui/canvas/WorkflowSceneController.h src/ui/canvas/WorkflowSceneController.cpp
+    src/ui/canvas/EdgeDragController.h src/ui/canvas/EdgeDragController.cpp
     src/ui/canvas/NodeGraphicsItem.h src/ui/canvas/NodeGraphicsItem.cpp
     src/ui/canvas/EdgeGraphicsItem.h src/ui/canvas/EdgeGraphicsItem.cpp
+    src/ui/canvas/CanvasZ.h
     src/ui/canvas/EdgeRouteTypes.h
     src/ui/canvas/EdgeRouter.h src/ui/canvas/EdgeRouter.cpp
     src/ui/canvas/EdgePathBuilder.h src/ui/canvas/EdgePathBuilder.cpp
@@ -127,11 +132,16 @@ set(UI_SOURCES
     src/ui/editor/PythonNodeEditorDialog.h src/ui/editor/PythonNodeEditorDialog.cpp
     src/ui/editor/PythonSyntaxHighlighter.h src/ui/editor/PythonSyntaxHighlighter.cpp
     src/ui/editor/PythonCompleter.h src/ui/editor/PythonCompleter.cpp
+    src/ui/inspector/NodeInspectorViewModel.h
     src/ui/inspector/NodeInspector.h src/ui/inspector/NodeInspector.cpp
+    src/ui/output/OutputPanelViewModel.h
     src/ui/output/OutputPanel.h src/ui/output/OutputPanel.cpp
     src/ui/theme/ThemeManager.h src/ui/theme/ThemeManager.cpp
+    src/ui/theme/UiMetrics.h
+    src/ui/theme/StyleReloader.h src/ui/theme/StyleReloader.cpp
     src/ui/widgets/IconSquareButton.h src/ui/widgets/IconSquareButton.cpp
     src/ui/widgets/CommandBar.h src/ui/widgets/CommandBar.cpp
+    src/ui/widgets/EmptyStateOverlay.h src/ui/widgets/EmptyStateOverlay.cpp
 )
 
 set(APP_SOURCES
@@ -239,6 +249,31 @@ target_link_libraries(test_output_panel PRIVATE vws_ui Qt6::Widgets)
 add_test(NAME output_panel COMMAND test_output_panel)
 set_tests_properties(output_panel PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+qt_add_executable(test_empty_state_overlay
+    tests/unit/test_empty_state_overlay.cpp
+)
+target_include_directories(test_empty_state_overlay PRIVATE src)
+target_link_libraries(test_empty_state_overlay PRIVATE vws_ui Qt6::Widgets)
+add_test(NAME empty_state_overlay COMMAND test_empty_state_overlay)
+set_tests_properties(empty_state_overlay PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_executable(test_theme_manager
+    tests/unit/test_theme_manager.cpp
+    resources/resources.qrc
+)
+target_include_directories(test_theme_manager PRIVATE src)
+target_link_libraries(test_theme_manager PRIVATE vws_ui Qt6::Widgets)
+add_test(NAME theme_manager COMMAND test_theme_manager)
+set_tests_properties(theme_manager PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_executable(test_main_window_layout_builder
+    tests/unit/test_main_window_layout_builder.cpp
+)
+target_include_directories(test_main_window_layout_builder PRIVATE src)
+target_link_libraries(test_main_window_layout_builder PRIVATE vws_ui Qt6::Widgets)
+add_test(NAME main_window_layout_builder COMMAND test_main_window_layout_builder)
+set_tests_properties(main_window_layout_builder PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 vws_add_test(run_service
     tests/unit/test_run_service.cpp
 )
@@ -265,10 +300,13 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
         workflow_document
         node_factory
         presentation_state
-        canvas_items
-        output_panel
-        run_service
-        python_editor
+            canvas_items
+            output_panel
+            empty_state_overlay
+            theme_manager
+            main_window_layout_builder
+            run_service
+            python_editor
         PROPERTIES ENVIRONMENT_MODIFICATION "${VWS_WINDOWS_TEST_PATH}"
     )
 endif()

@@ -5,6 +5,7 @@
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeConfigView.h"
 #include "domain/NodeTypes.h"
+#include "ui/theme/StyleReloader.h"
 
 #include <QCloseEvent>
 #include <QFrame>
@@ -113,7 +114,8 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 
     m_descriptionEdit = new QLineEdit(this);
     m_descriptionEdit->setPlaceholderText(tr("Describe what this node does"));
-    m_descriptionEdit->setFixedHeight(28);
+    m_descriptionEdit->setMinimumHeight(28);
+    m_descriptionEdit->setMaximumHeight(36);
 
     m_timeoutEdit = new QLineEdit(this);
     m_timeoutEdit->setPlaceholderText(tr("300000"));
@@ -217,10 +219,10 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
         leftLayout->addStretch(1);
 
         auto* leftScrollArea = new QScrollArea(this);
+        leftScrollArea->setObjectName(QStringLiteral("agentEditorLeftScrollArea"));
         leftScrollArea->setWidgetResizable(true);
         leftScrollArea->setFrameShape(QFrame::NoFrame);
         leftScrollArea->setAutoFillBackground(false);
-        leftScrollArea->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }"));
         leftScrollArea->setWidget(leftPanel);
 
         auto* rightPanel = new QWidget(this);
@@ -483,8 +485,7 @@ void PythonNodeEditorDialog::setDirty(bool dirty)
     m_dirty = dirty;
     m_dirtyLabel->setText(dirty ? tr("Unsaved") : tr("Saved"));
     m_dirtyLabel->setProperty("dirty", dirty);
-    m_dirtyLabel->style()->unpolish(m_dirtyLabel);
-    m_dirtyLabel->style()->polish(m_dirtyLabel);
+    StyleReloader::refresh(m_dirtyLabel);
     m_saveButton->setEnabled(dirty);
     m_saveButton->setToolTip(dirty
         ? tr("Save changes")

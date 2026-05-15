@@ -1,4 +1,5 @@
 #include "ui/widgets/IconSquareButton.h"
+#include "ui/theme/StyleReloader.h"
 #include "ui/theme/ThemeManager.h"
 
 #include <QPainter>
@@ -77,8 +78,7 @@ void IconSquareButton::setRole(Role role)
 
     m_role = role;
     setProperty("buttonRole", rolePropertyValue(role));
-    style()->unpolish(this);
-    style()->polish(this);
+    StyleReloader::refresh(this);
 
     if (m_hasSourceIcon) {
         refreshIcon();

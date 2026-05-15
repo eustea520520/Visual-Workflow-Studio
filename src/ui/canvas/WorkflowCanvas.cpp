@@ -1,6 +1,5 @@
 ﻿#include "ui/canvas/WorkflowCanvas.h"
 
-#include "application/NodeFactory.h"
 #include "application/WorkflowEditService.h"
 #include "ui/canvas/EdgeGraphicsItem.h"
 #include "ui/canvas/WorkflowCanvasContextMenu.h"
@@ -13,37 +12,28 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFrame>
-#include <QGraphicsPathItem>
 #include <QGraphicsScene>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
-#include <QPen>
-#include <QScrollBar>
 #include <QSet>
 #include <QSignalBlocker>
 #include <QWheelEvent>
 
 namespace vws::ui {
 
-using application::DataTransferTemplate;
-using StarterTemplateKind = application::NodeFactory::StarterTemplateKind;
-
 namespace {
 
 constexpr qreal PortHitRadius = 14.0;
-constexpr qreal ZoomStep = 1.15;
-constexpr qreal MinZoom = 0.25;
-constexpr qreal MaxZoom = 3.0;
 
 } // namespace
 
 WorkflowCanvas::WorkflowCanvas(QWidget* parent)
     : QGraphicsView(parent)
 {
+    setObjectName(QStringLiteral("workflowCanvas"));
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     m_sceneController = new WorkflowSceneController(m_scene, this);
@@ -115,30 +105,6 @@ void WorkflowCanvas::addNode(const domain::Node& node)
         m_sceneController->selectNode(nodeToAdd.nodeId);
     }
     emit workflowChanged(workflow());
-}
-
-void WorkflowCanvas::addStarterNodeAt(const QPointF& scenePos)
-{
-    addNode(application::NodeFactory::createStarterNode(
-        scenePos,
-        m_workflow.nodes.size(),
-        StarterTemplateKind::DataOutput));
-}
-
-void WorkflowCanvas::addFunctionNodeAt(const QPointF& scenePos)
-{
-    addNode(application::NodeFactory::createFunctionNode(
-        scenePos,
-        m_workflow.nodes.size(),
-        DataTransferTemplate::DataToData));
-}
-
-void WorkflowCanvas::addAgentNodeAt(const QPointF& scenePos)
-{
-    addNode(application::NodeFactory::createAgentNode(
-        scenePos,
-        m_workflow.nodes.size(),
-        DataTransferTemplate::DataToData));
 }
 
 bool WorkflowCanvas::connectSelectedNodes()
@@ -235,13 +201,13 @@ void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
 
     switch (action.type) {
     case WorkflowCanvasContextAction::Type::AddStarter:
-        addNode(application::NodeFactory::createStarterNode(scenePos, m_workflow.nodes.size(), action.starterTemplate));
+        emit starterNodeRequested(scenePos, action.starterTemplate);
         return;
     case WorkflowCanvasContextAction::Type::AddFunction:
-        addNode(application::NodeFactory::createFunctionNode(scenePos, m_workflow.nodes.size(), action.dataTransferTemplate));
+        emit functionNodeRequested(scenePos, action.dataTransferTemplate);
         return;
     case WorkflowCanvasContextAction::Type::AddAgent:
-        addNode(application::NodeFactory::createAgentNode(scenePos, m_workflow.nodes.size(), action.dataTransferTemplate));
+        emit agentNodeRequested(scenePos, action.dataTransferTemplate);
         return;
     case WorkflowCanvasContextAction::Type::ConnectSelected:
         connectSelectedNodes();
@@ -298,10 +264,7 @@ void WorkflowCanvas::keyPressEvent(QKeyEvent* event)
 void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::RightButton) {
-        m_rightButtonPanning = true;
-        m_lastPanViewportPos = event->pos();
-        m_previousCursor = cursor().shape();
-        setCursor(Qt::ClosedHandCursor);
+        m_interactionController.beginRightButtonPan(*this, event->pos());
         event->accept();
         return;
     }
@@ -311,16 +274,7 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
         if (auto* sourceNode = outputNodeAt(scenePos)) {
             // 从输出端口按下时进入“拖线”模式。
             // 此时不把事件继续交给节点图元，避免节点被拖动。
-            m_edgeDragSource = sourceNode;
-            m_edgeDragStartScenePos = sourceNode->outputAnchorScenePos();
-            m_edgePreviewItem = new QGraphicsPathItem();
-            m_edgePreviewItem->setZValue(0.5);
-            auto* tm = ThemeManager::instance();
-            m_edgePreviewItem->setPen(QPen(
-                tm ? tm->color("edge-preview") : QColor("#2563eb"),
-                2.0, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
-            m_edgePreviewItem->setPath(edgePreviewPath(m_edgeDragStartScenePos, scenePos));
-            m_scene->addItem(m_edgePreviewItem);
+            m_edgeDragController.begin(m_scene, sourceNode, scenePos);
             event->accept();
             return;
         }
@@ -335,17 +289,13 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
 
 void WorkflowCanvas::mouseMoveEvent(QMouseEvent* event)
 {
-    if (m_rightButtonPanning) {
-        const auto delta = event->pos() - m_lastPanViewportPos;
-        m_lastPanViewportPos = event->pos();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+    if (m_interactionController.updateRightButtonPan(*this, event->pos())) {
         event->accept();
         return;
     }
 
-    if (m_edgeDragSource != nullptr && m_edgePreviewItem != nullptr) {
-        m_edgePreviewItem->setPath(edgePreviewPath(m_edgeDragStartScenePos, mapToScene(event->pos())));
+    if (m_edgeDragController.isDragging()) {
+        m_edgeDragController.update(mapToScene(event->pos()));
         event->accept();
         return;
     }
@@ -355,25 +305,19 @@ void WorkflowCanvas::mouseMoveEvent(QMouseEvent* event)
 
 void WorkflowCanvas::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::RightButton && m_rightButtonPanning) {
-        m_rightButtonPanning = false;
-        setCursor(m_previousCursor);
+    if (event->button() == Qt::RightButton && m_interactionController.endRightButtonPan(*this)) {
         event->accept();
         return;
     }
 
-    if (m_edgeDragSource != nullptr) {
+    if (m_edgeDragController.isDragging()) {
         const auto scenePos = mapToScene(event->pos());
-        if (auto* targetNode = inputNodeAt(scenePos, m_edgeDragSource->nodeId())) {
-            createEdgeBetween(m_edgeDragSource->nodeId(), targetNode->nodeId());
+        const auto sourceNodeId = m_edgeDragController.sourceNodeId();
+        if (auto* targetNode = inputNodeAt(scenePos, sourceNodeId)) {
+            createEdgeBetween(sourceNodeId, targetNode->nodeId());
         }
 
-        if (m_edgePreviewItem != nullptr) {
-            m_scene->removeItem(m_edgePreviewItem);
-            delete m_edgePreviewItem;
-            m_edgePreviewItem = nullptr;
-        }
-        m_edgeDragSource = nullptr;
+        m_edgeDragController.clear(m_scene);
         event->accept();
         return;
     }
@@ -384,14 +328,14 @@ void WorkflowCanvas::mouseReleaseEvent(QMouseEvent* event)
 void WorkflowCanvas::wheelEvent(QWheelEvent* event)
 {
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
-        zoomAtCursor(event->angleDelta().y());
+        m_interactionController.zoomAtCursor(*this, event->angleDelta().y());
         event->accept();
         return;
     }
 
     if (event->modifiers().testFlag(Qt::ShiftModifier)) {
         const auto delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta);
+        m_interactionController.panHorizontally(*this, delta);
         event->accept();
         return;
     }
@@ -412,7 +356,7 @@ void WorkflowCanvas::rebuildSceneFromWorkflow()
     // Block scene signals during the rebuild so selectionChanged cannot fire
     // while the item maps are intentionally empty.
     const QSignalBlocker sceneBlocker(m_scene);
-    clearEdgeDragState();
+    m_edgeDragController.clear(m_scene);
     if (m_sceneController != nullptr) {
         m_sceneController->clear();
     }
@@ -452,20 +396,6 @@ void WorkflowCanvas::updateAllEdgeRoutes()
     if (m_sceneController != nullptr) {
         m_sceneController->updateAllEdgeRoutes(m_workflow);
     }
-}
-
-void WorkflowCanvas::clearEdgeDragState()
-{
-    m_edgeDragSource = nullptr;
-    if (m_edgePreviewItem == nullptr) {
-        return;
-    }
-
-    if (m_edgePreviewItem->scene() == m_scene) {
-        m_scene->removeItem(m_edgePreviewItem);
-    }
-    delete m_edgePreviewItem;
-    m_edgePreviewItem = nullptr;
 }
 
 void WorkflowCanvas::deleteSelectedItems()
@@ -509,8 +439,8 @@ void WorkflowCanvas::removeEdge(const QString& edgeId)
 
 void WorkflowCanvas::removeNode(const QString& nodeId)
 {
-    if (m_edgeDragSource != nullptr && m_edgeDragSource->nodeId() == nodeId) {
-        clearEdgeDragState();
+    if (m_edgeDragController.sourceIs(nodeId)) {
+        m_edgeDragController.clear(m_scene);
     }
 
     const auto connectedEdges = m_sceneController != nullptr
@@ -556,22 +486,6 @@ void WorkflowCanvas::undoLastChange()
     emit workflowChanged(m_workflow);
 }
 
-void WorkflowCanvas::zoomAtCursor(int wheelDelta)
-{
-    if (wheelDelta == 0) {
-        return;
-    }
-
-    const auto currentZoom = transform().m11();
-    const auto factor = wheelDelta > 0 ? ZoomStep : 1.0 / ZoomStep;
-    const auto nextZoom = currentZoom * factor;
-    if (nextZoom < MinZoom || nextZoom > MaxZoom) {
-        return;
-    }
-
-    scale(factor, factor);
-}
-
 NodeGraphicsItem* WorkflowCanvas::outputNodeAt(const QPointF& scenePos) const
 {
     return m_sceneController != nullptr
@@ -584,17 +498,6 @@ NodeGraphicsItem* WorkflowCanvas::inputNodeAt(const QPointF& scenePos, const QSt
     return m_sceneController != nullptr
         ? m_sceneController->inputNodeAt(scenePos, PortHitRadius, excludedNodeId)
         : nullptr;
-}
-
-QPainterPath WorkflowCanvas::edgePreviewPath(const QPointF& start, const QPointF& end) const
-{
-    const auto dx = qMax<qreal>(80.0, qAbs(end.x() - start.x()) * 0.45);
-    QPainterPath path(start);
-    path.cubicTo(
-        QPointF(start.x() + dx, start.y()),
-        QPointF(end.x() - dx, end.y()),
-        end);
-    return path;
 }
 
 NodeVisualState WorkflowCanvas::visualStateFromStatus(const QString& status) const
@@ -631,11 +534,7 @@ void WorkflowCanvas::refreshTheme()
         }
     }
 
-    if (m_edgePreviewItem != nullptr) {
-        m_edgePreviewItem->setPen(QPen(
-            tm ? tm->color("edge-preview") : QColor("#2563EB"),
-            2.0, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
-    }
+    m_edgeDragController.refreshTheme();
 
     viewport()->update();
 }

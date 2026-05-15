@@ -6,17 +6,17 @@
 QWidget {
     font-family: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
     font-size: 13px;
-    color: #0F172A;
+    color: ${text-primary};
 }
 
 QMainWindow,
 QWidget#centralWrapper {
-    background: #F5F6FA;
-    color: #0F172A;
+    background: ${window-bg};
+    color: ${text-primary};
 }
 
 QWidget#canvasHost {
-    background: #F7F8FB;
+    background: ${canvas-bg};
 }
 
 /* ── QMenuBar ─────────────────────────────────────────────── */
@@ -59,9 +59,9 @@ QMenu::separator {
 
 /* ── CommandBar ───────────────────────────────────────────── */
 QFrame#CommandBar {
-    background: #FFFFFF;
+    background: ${surface-0};
     border: none;
-    border-bottom: 1px solid #E2E8F0;
+    border-bottom: 1px solid ${border-subtle};
     min-height: 52px;
 }
 
@@ -110,16 +110,16 @@ QPushButton:disabled {
 
 /* ── QPushButton roles ────────────────────────────────────── */
 QPushButton[buttonRole="primary"] {
-    background: #2563EB;
-    color: #FFFFFF;
-    border-color: #2563EB;
+    background: ${primary};
+    color: ${text-on-accent};
+    border-color: ${primary};
 }
 QPushButton[buttonRole="primary"]:hover {
-    background: #1D4ED8;
-    border-color: #1D4ED8;
+    background: ${primary-hover};
+    border-color: ${primary-hover};
 }
 QPushButton[buttonRole="primary"]:pressed {
-    background: #1E40AF;
+    background: ${accent-pressed};
 }
 
 QPushButton[buttonRole="secondary"] {
@@ -144,13 +144,13 @@ QPushButton[buttonRole="ghost"]:hover {
 }
 
 QPushButton[buttonRole="danger"] {
-    background: #DC2626;
-    color: #FFFFFF;
-    border-color: #DC2626;
+    background: ${danger};
+    color: ${text-on-accent};
+    border-color: ${danger};
 }
 QPushButton[buttonRole="danger"]:hover {
-    background: #B91C1C;
-    border-color: #B91C1C;
+    background: ${danger-hover};
+    border-color: ${danger-hover};
 }
 QPushButton[buttonRole="danger"]:pressed {
     background: #991B1B;
@@ -185,15 +185,15 @@ QSplitter::handle:hover {
 
 /* ── Panels ───────────────────────────────────────────────── */
 QWidget#workspaceExplorer,
-QWidget#inspector,
+QWidget#nodeInspector,
 QWidget#outputPanel {
-    background: #FFFFFF;
+    background: ${surface-0};
     border: none;
 }
 
 QFrame[panel="true"] {
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
+    background: ${surface-0};
+    border: 1px solid ${border-subtle};
     border-radius: 14px;
 }
 
@@ -451,7 +451,8 @@ QDialog {
 QDialog QLabel {
     color: #0F172A;
 }
-QScrollArea#agentEditorSplitter QScrollArea,
+QScrollArea#agentEditorLeftScrollArea,
+QScrollArea#agentEditorLeftScrollArea > QWidget,
 QWidget#agentEditorLeftPanel {
     background: transparent;
 }
@@ -463,10 +464,10 @@ QLabel#dialogTitle {
 
 /* ── Canvas Overlay ───────────────────────────────────────── */
 QWidget#canvasOverlay {
-    background: rgba(15, 23, 42, 41);
+    background: ${overlay-bg};
 }
 QLabel#canvasOverlayTitle {
-    color: #FFFFFF;
+    color: ${overlay-text};
     font-size: 20px;
     font-weight: 600;
     background: transparent;

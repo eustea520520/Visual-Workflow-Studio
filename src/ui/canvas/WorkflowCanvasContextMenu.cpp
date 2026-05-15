@@ -11,9 +11,6 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
     bool canConnectSelected,
     bool hasSelection)
 {
-    using StarterTemplateKind = application::NodeFactory::StarterTemplateKind;
-    using DataTransferTemplate = application::DataTransferTemplate;
-
     QMenu menu(parent);
     auto* starterMenu = menu.addMenu(QObject::tr("Add Starter Node"));
     auto* addStarterEmptyAction = starterMenu->addAction(QObject::tr("Empty Output"));
@@ -47,37 +44,37 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
 
     if (selectedAction == addStarterEmptyAction) {
         action.type = WorkflowCanvasContextAction::Type::AddStarter;
-        action.starterTemplate = StarterTemplateKind::EmptyOutput;
+        action.starterTemplate = StarterNodeTemplate::EmptyOutput;
     } else if (selectedAction == addStarterDataAction) {
         action.type = WorkflowCanvasContextAction::Type::AddStarter;
-        action.starterTemplate = StarterTemplateKind::DataOutput;
+        action.starterTemplate = StarterNodeTemplate::DataOutput;
     } else if (selectedAction == addStarterFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddStarter;
-        action.starterTemplate = StarterTemplateKind::FileOutput;
+        action.starterTemplate = StarterNodeTemplate::FileOutput;
     } else if (selectedAction == addFunctionDataToDataAction) {
         action.type = WorkflowCanvasContextAction::Type::AddFunction;
-        action.dataTransferTemplate = DataTransferTemplate::DataToData;
+        action.dataTransferTemplate = DataTransferNodeTemplate::DataToData;
     } else if (selectedAction == addFunctionDataToFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddFunction;
-        action.dataTransferTemplate = DataTransferTemplate::DataToFile;
+        action.dataTransferTemplate = DataTransferNodeTemplate::DataToFile;
     } else if (selectedAction == addFunctionFileToDataAction) {
         action.type = WorkflowCanvasContextAction::Type::AddFunction;
-        action.dataTransferTemplate = DataTransferTemplate::FileToData;
+        action.dataTransferTemplate = DataTransferNodeTemplate::FileToData;
     } else if (selectedAction == addFunctionFileToFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddFunction;
-        action.dataTransferTemplate = DataTransferTemplate::FileToFile;
+        action.dataTransferTemplate = DataTransferNodeTemplate::FileToFile;
     } else if (selectedAction == addAgentDataToDataAction) {
         action.type = WorkflowCanvasContextAction::Type::AddAgent;
-        action.dataTransferTemplate = DataTransferTemplate::DataToData;
+        action.dataTransferTemplate = DataTransferNodeTemplate::DataToData;
     } else if (selectedAction == addAgentDataToFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddAgent;
-        action.dataTransferTemplate = DataTransferTemplate::DataToFile;
+        action.dataTransferTemplate = DataTransferNodeTemplate::DataToFile;
     } else if (selectedAction == addAgentFileToDataAction) {
         action.type = WorkflowCanvasContextAction::Type::AddAgent;
-        action.dataTransferTemplate = DataTransferTemplate::FileToData;
+        action.dataTransferTemplate = DataTransferNodeTemplate::FileToData;
     } else if (selectedAction == addAgentFileToFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddAgent;
-        action.dataTransferTemplate = DataTransferTemplate::FileToFile;
+        action.dataTransferTemplate = DataTransferNodeTemplate::FileToFile;
     } else if (selectedAction == connectAction) {
         action.type = WorkflowCanvasContextAction::Type::ConnectSelected;
     } else if (selectedAction == deleteAction) {

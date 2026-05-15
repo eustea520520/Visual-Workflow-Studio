@@ -2,6 +2,7 @@
 
 #include "domain/Artifact.h"
 #include "domain/RunRecord.h"
+#include "ui/output/OutputPanelViewModel.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -28,9 +29,8 @@ class OutputPanel final : public QWidget {
 public:
     explicit OutputPanel(QWidget* parent = nullptr);
 
+    void render(const OutputPanelViewModel& viewModel);
     void clearRun();
-    void setWorkflowName(const QString& workflowName);
-    void setNodeNames(const QHash<QString, QString>& nodeNames);
     void recordWorkflowStatus(const QString& runId, const QString& status);
     void recordNodeStatus(const QString& runId, const QString& nodeId, const QString& status);
     void recordNodeOutput(const QString& runId, const QString& nodeId, const QJsonObject& outputs);

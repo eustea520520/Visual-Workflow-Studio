@@ -3,7 +3,10 @@
 #include "application/WorkflowClipboard.h"
 #include "application/WorkflowHistory.h"
 #include "domain/Workflow.h"
+#include "ui/canvas/EdgeDragController.h"
 #include "ui/canvas/NodeGraphicsItem.h"
+#include "ui/canvas/WorkflowCanvasContextMenu.h"
+#include "ui/canvas/WorkflowCanvasInteractionController.h"
 
 #include <QGraphicsView>
 #include <QList>
@@ -13,7 +16,6 @@
 
 class QGraphicsScene;
 class QContextMenuEvent;
-class QGraphicsPathItem;
 class QKeyEvent;
 class QMouseEvent;
 class QWheelEvent;
@@ -38,9 +40,6 @@ public:
     std::optional<domain::Node> selectedNode() const;
 
     void addNode(const domain::Node& node);
-    void addStarterNodeAt(const QPointF& scenePos);
-    void addFunctionNodeAt(const QPointF& scenePos);
-    void addAgentNodeAt(const QPointF& scenePos);
     bool connectSelectedNodes();
     void clearWorkflow();
     bool updateNode(const domain::Node& node);
@@ -54,6 +53,9 @@ signals:
     void workflowChanged(const domain::Workflow& workflow);
     void saveRequested();
     void nodeTemplateDropped(const QString& templateId, const QPointF& scenePos);
+    void starterNodeRequested(const QPointF& scenePos, StarterNodeTemplate templateKind);
+    void functionNodeRequested(const QPointF& scenePos, DataTransferNodeTemplate templateKind);
+    void agentNodeRequested(const QPointF& scenePos, DataTransferNodeTemplate templateKind);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -75,17 +77,14 @@ private:
     bool createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId);
     void updateEdgesForNode(const QString& nodeId);
     void updateAllEdgeRoutes();
-    void clearEdgeDragState();
     void deleteSelectedItems();
     void removeEdge(const QString& edgeId);
     void removeNode(const QString& nodeId);
     void syncWorkflowFromItems();
     void pushUndoState();
     void undoLastChange();
-    void zoomAtCursor(int wheelDelta);
     NodeGraphicsItem* outputNodeAt(const QPointF& scenePos) const;
     NodeGraphicsItem* inputNodeAt(const QPointF& scenePos, const QString& excludedNodeId = {}) const;
-    QPainterPath edgePreviewPath(const QPointF& start, const QPointF& end) const;
     NodeVisualState visualStateFromStatus(const QString& status) const;
     QList<NodeGraphicsItem*> selectedNodeItems() const;
     void copySelectedNodes();
@@ -96,12 +95,8 @@ private:
     WorkflowSceneController* m_sceneController = nullptr;
     domain::Workflow m_workflow;
     application::WorkflowHistory m_history;
-    NodeGraphicsItem* m_edgeDragSource = nullptr;
-    QGraphicsPathItem* m_edgePreviewItem = nullptr;
-    QPointF m_edgeDragStartScenePos;
-    bool m_rightButtonPanning = false;
-    QPoint m_lastPanViewportPos;
-    Qt::CursorShape m_previousCursor = Qt::ArrowCursor;
+    WorkflowCanvasInteractionController m_interactionController;
+    EdgeDragController m_edgeDragController;
     application::WorkflowClipboard m_clipboard;
 };
 

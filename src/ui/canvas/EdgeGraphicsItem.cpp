@@ -1,6 +1,7 @@
 #include "ui/canvas/EdgeGraphicsItem.h"
 
 #include "ui/canvas/ArrowHeadBuilder.h"
+#include "ui/canvas/CanvasZ.h"
 #include "ui/canvas/EdgeRouter.h"
 #include "ui/canvas/NodeGraphicsItem.h"
 #include "ui/theme/ThemeManager.h"
@@ -29,7 +30,7 @@ EdgeGraphicsItem::EdgeGraphicsItem(domain::Edge edge, NodeGraphicsItem* sourceNo
 {
     setFlag(ItemIsSelectable);
     setAcceptHoverEvents(true);
-    setZValue(0.0);
+    setZValue(CanvasZ::Edge);
     updatePath();
 }
 

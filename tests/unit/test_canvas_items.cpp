@@ -1,3 +1,4 @@
+#include "application/NodeFactory.h"
 #include "domain/Workflow.h"
 #include "ui/canvas/EdgeGraphicsItem.h"
 #include "ui/canvas/NodeGraphicsItem.h"
@@ -82,7 +83,10 @@ int main(int argc, char* argv[])
         return check;
     }
 
-    canvas.addStarterNodeAt(QPointF(-360, 36));
+    canvas.addNode(vws::application::NodeFactory::createStarterNode(
+        QPointF(-360, 36),
+        canvas.workflow().nodes.size(),
+        vws::application::NodeFactory::StarterTemplateKind::DataOutput));
     auto workflowWithStarterNode = canvas.workflow();
     if (const auto check = expect(workflowWithStarterNode.nodes.size() == 3,
             "Canvas context helper should add a starter node")) {
@@ -101,7 +105,10 @@ int main(int argc, char* argv[])
         return check;
     }
 
-    canvas.addFunctionNodeAt(QPointF(24, 36));
+    canvas.addNode(vws::application::NodeFactory::createFunctionNode(
+        QPointF(24, 36),
+        canvas.workflow().nodes.size(),
+        vws::application::DataTransferTemplate::DataToData));
     auto workflowWithContextNode = canvas.workflow();
     if (const auto check = expect(workflowWithContextNode.nodes.size() == 4,
             "Canvas context helper should add a function node")) {
@@ -223,7 +230,10 @@ int main(int argc, char* argv[])
         return check;
     }
 
-    canvas.addStarterNodeAt(QPointF(-520, 156));
+    canvas.addNode(vws::application::NodeFactory::createStarterNode(
+        QPointF(-520, 156),
+        canvas.workflow().nodes.size(),
+        vws::application::NodeFactory::StarterTemplateKind::DataOutput));
     const auto workflowWithSecondStarter = canvas.workflow();
     const auto secondStarterId = workflowWithSecondStarter.nodes.last().nodeId;
     auto* secondStarterItem = findNodeItem(canvas.scene(), secondStarterId);
@@ -243,7 +253,10 @@ int main(int argc, char* argv[])
     }
 
     for (int i = 0; i < 20; ++i) {
-        canvas.addStarterNodeAt(QPointF(-640 + i * 12, 240 + i * 4));
+        canvas.addNode(vws::application::NodeFactory::createStarterNode(
+            QPointF(-640 + i * 12, 240 + i * 4),
+            canvas.workflow().nodes.size(),
+            vws::application::NodeFactory::StarterTemplateKind::DataOutput));
         const auto stressWorkflow = canvas.workflow();
         const auto stressStarterId = stressWorkflow.nodes.last().nodeId;
         auto* stressStarterItem = findNodeItem(canvas.scene(), stressStarterId);
@@ -286,7 +299,10 @@ int main(int argc, char* argv[])
     }
 
     const auto countBeforeUndoShortcut = canvas.workflow().nodes.size();
-    canvas.addFunctionNodeAt(QPointF(320, 220));
+    canvas.addNode(vws::application::NodeFactory::createFunctionNode(
+        QPointF(320, 220),
+        canvas.workflow().nodes.size(),
+        vws::application::DataTransferTemplate::DataToData));
     QKeyEvent undoEvent(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
     QApplication::sendEvent(&canvas, &undoEvent);
     if (const auto check = expect(canvas.workflow().nodes.size() == countBeforeUndoShortcut,

@@ -16,6 +16,12 @@
 
 namespace vws::ui {
 
+namespace {
+
+constexpr const char* NodeTemplateMimeType = "application/x-vws-node-template-id";
+
+} // namespace
+
 WorkspaceExplorer::WorkspaceExplorer(QWidget* parent)
     : QWidget(parent)
 {
@@ -24,23 +30,15 @@ WorkspaceExplorer::WorkspaceExplorer(QWidget* parent)
     buildUi();
 }
 
-void WorkspaceExplorer::setWorkspaceData(
-    const QString& workspaceName,
-    const QStringList& workflowNames,
-    const QStringList& workflowIds,
-    const QStringList& templateNames,
-    const QStringList& templateIds,
-    const QStringList& runNames,
-    const QStringList& runIds,
-    const QSet<QString>& runningWorkflowIds)
+void WorkspaceExplorer::render(const WorkspaceExplorerViewModel& viewModel)
 {
-    m_workspaceLabel->setText(workspaceName.trimmed().isEmpty()
+    m_workspaceLabel->setText(viewModel.workspaceName.trimmed().isEmpty()
             ? tr("Workspace Explorer")
-            : tr("Workspace: %1").arg(workspaceName));
+            : tr("Workspace: %1").arg(viewModel.workspaceName));
 
-    rebuildWorkflowCategory(workflowNames, workflowIds, runningWorkflowIds);
-    rebuildTemplateCategory(templateNames, templateIds);
-    rebuildRunCategory(runNames, runIds);
+    rebuildWorkflowCategory(viewModel.workflows);
+    rebuildTemplateCategory(viewModel.templates);
+    rebuildRunCategory(viewModel.runs);
     m_tree->expandAll();
 }
 
@@ -90,7 +88,12 @@ void WorkspaceExplorer::buildUi()
         }
     });
 
-    setWorkspaceData({}, {}, {}, {tr("Function Node"), tr("Agent Node")}, {});
+    WorkspaceExplorerViewModel initialViewModel;
+    initialViewModel.templates = {
+        WorkspaceExplorerItemViewModel{QString(), tr("Function Node"), false},
+        WorkspaceExplorerItemViewModel{QString(), tr("Agent Node"), false},
+    };
+    render(initialViewModel);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
@@ -113,60 +116,59 @@ void WorkspaceExplorer::rebuildCategory(QTreeWidgetItem* rootItem, const QString
     }
 }
 
-void WorkspaceExplorer::rebuildWorkflowCategory(const QStringList& names, const QStringList& workflowIds, const QSet<QString>& runningWorkflowIds)
+void WorkspaceExplorer::rebuildWorkflowCategory(const QList<WorkspaceExplorerItemViewModel>& workflows)
 {
     qDeleteAll(m_workflowsItem->takeChildren());
 
-    if (names.isEmpty()) {
+    if (workflows.isEmpty()) {
         m_workflowsItem->addChild(new QTreeWidgetItem({tr("No workflow loaded")}));
         return;
     }
 
-    for (int index = 0; index < names.size(); ++index) {
-        const bool running = runningWorkflowIds.contains(workflowIds.at(index));
-        const QString displayName = running
-            ? QStringLiteral("● %1").arg(names.at(index))
-            : names.at(index);
+    for (const auto& workflow : workflows) {
+        const QString displayName = workflow.running
+            ? QStringLiteral("* %1").arg(workflow.name)
+            : workflow.name;
 
         auto* item = new QTreeWidgetItem({displayName});
-        if (index < workflowIds.size()) {
-            item->setData(0, Qt::UserRole, workflowIds.at(index));
+        if (!workflow.id.isEmpty()) {
+            item->setData(0, Qt::UserRole, workflow.id);
         }
         m_workflowsItem->addChild(item);
     }
 }
 
-void WorkspaceExplorer::rebuildTemplateCategory(const QStringList& names, const QStringList& templateIds)
+void WorkspaceExplorer::rebuildTemplateCategory(const QList<WorkspaceExplorerItemViewModel>& templates)
 {
     qDeleteAll(m_templatesItem->takeChildren());
 
-    if (names.isEmpty()) {
+    if (templates.isEmpty()) {
         m_templatesItem->addChild(new QTreeWidgetItem({tr("No node templates")}));
         return;
     }
 
-    for (int index = 0; index < names.size(); ++index) {
-        auto* item = new QTreeWidgetItem({names.at(index)});
-        if (index < templateIds.size()) {
-            item->setData(0, Qt::UserRole, templateIds.at(index));
+    for (const auto& nodeTemplate : templates) {
+        auto* item = new QTreeWidgetItem({nodeTemplate.name});
+        if (!nodeTemplate.id.isEmpty()) {
+            item->setData(0, Qt::UserRole, nodeTemplate.id);
         }
         m_templatesItem->addChild(item);
     }
 }
 
-void WorkspaceExplorer::rebuildRunCategory(const QStringList& names, const QStringList& runIds)
+void WorkspaceExplorer::rebuildRunCategory(const QList<WorkspaceExplorerItemViewModel>& runs)
 {
     qDeleteAll(m_runsItem->takeChildren());
 
-    if (names.isEmpty()) {
+    if (runs.isEmpty()) {
         m_runsItem->addChild(new QTreeWidgetItem({tr("No run history")}));
         return;
     }
 
-    for (int index = 0; index < names.size(); ++index) {
-        auto* item = new QTreeWidgetItem({names.at(index)});
-        if (index < runIds.size()) {
-            item->setData(0, Qt::UserRole, runIds.at(index));
+    for (const auto& run : runs) {
+        auto* item = new QTreeWidgetItem({run.name});
+        if (!run.id.isEmpty()) {
+            item->setData(0, Qt::UserRole, run.id);
         }
         m_runsItem->addChild(item);
     }
@@ -209,9 +211,7 @@ bool WorkspaceExplorer::eventFilter(QObject* watched, QEvent* event)
         }
 
         auto* mimeData = new QMimeData();
-        mimeData->setData(
-            "application/x-vws-node-template-id",
-            templateId.toUtf8());
+        mimeData->setData(NodeTemplateMimeType, templateId.toUtf8());
 
         auto* drag = new QDrag(m_tree);
         drag->setMimeData(mimeData);

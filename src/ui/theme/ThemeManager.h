@@ -33,6 +33,7 @@ signals:
 
 private:
     QString loadStyleSheet(const QString& resourcePath) const;
+    QString renderStyleSheet(QString styleSheet) const;
     void buildColorMaps();
 
     AppTheme m_currentTheme = AppTheme::Light;
