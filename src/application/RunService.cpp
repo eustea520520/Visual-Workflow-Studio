@@ -1,7 +1,7 @@
 #include "application/RunService.h"
 
 #include "domain/Workflow.h"
-#include "execution/ExecutionEngine.h"
+#include "execution/WorkflowExecutionResult.h"
 #include "infrastructure/FileSystemUtils.h"
 #include "infrastructure/JsonUtils.h"
 
@@ -12,15 +12,12 @@
 
 namespace vws::application {
 
-RunService::RunService(execution::ExecutionEngine& executionEngine)
-    : m_executionEngine(executionEngine)
+RunService::RunService()
 {
 }
 
 QStringList RunService::recentRuns(const QString& workspaceRootPath) const
 {
-    Q_UNUSED(m_executionEngine);
-
     const auto entries = recentRunEntries(workspaceRootPath);
     QStringList runs;
     for (const auto& entry : entries) {
@@ -31,8 +28,6 @@ QStringList RunService::recentRuns(const QString& workspaceRootPath) const
 
 QList<RunListEntry> RunService::recentRunEntries(const QString& workspaceRootPath) const
 {
-    Q_UNUSED(m_executionEngine);
-
     QList<RunListEntry> entries;
 
     const auto runDirectories = QDir(QDir(workspaceRootPath).filePath("runs")).entryInfoList(
@@ -67,8 +62,6 @@ bool RunService::saveRunRecord(
     const execution::WorkflowExecutionResult& result,
     QString* errorMessage) const
 {
-    Q_UNUSED(m_executionEngine);
-
     const auto runDirectoryPath = QDir(workspaceRootPath).filePath(QString("runs/%1").arg(result.runId));
     if (!infrastructure::FileSystemUtils::ensureDirectory(runDirectoryPath, errorMessage)) {
         return false;
@@ -131,8 +124,6 @@ bool RunService::loadRunRecord(
     domain::RunRecord& record,
     QString* errorMessage) const
 {
-    Q_UNUSED(m_executionEngine);
-
     const auto recordPath = QDir(workspaceRootPath).filePath(
         QString("runs/%1/run_record.json").arg(runId));
 

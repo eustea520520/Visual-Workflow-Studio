@@ -1,7 +1,9 @@
-#include "ui/inspector/NodeInspector.h"
+﻿#include "ui/inspector/NodeInspector.h"
 
 #include "ui/editor/PythonCodeEditor.h"
-#include "ui/editor/PythonCodeTemplates.h"
+#include "application/PythonCodeTemplates.h"
+#include "domain/NodeConfigView.h"
+#include "domain/NodeTypes.h"
 
 #include <QColor>
 #include <QFormLayout>
@@ -14,6 +16,9 @@
 #include <QVBoxLayout>
 
 namespace vws::ui {
+
+using application::PythonCodeTemplates;
+namespace NodeTypes = domain::NodeTypes;
 
 NodeInspector::NodeInspector(QWidget* parent)
     : QWidget(parent)
@@ -31,15 +36,16 @@ void NodeInspector::displayNode(const domain::Node& node)
 void NodeInspector::displayNode(const domain::Node& node, const QJsonObject& selectedNodeOutput)
 {
     m_currentNodeId = node.nodeId;
+    const domain::NodeConfigView config(node.config);
 
     if (m_pythonEditor != nullptr) {
-        const auto nextCode = node.config.value("code").toString();
+        const auto nextCode = config.code();
         if (m_pythonEditor->code() != nextCode) {
             m_pythonEditor->setCode(nextCode);
         }
     }
 
-    if (node.type.trimmed().toLower() != "agent") {
+    if (node.type.trimmed().toLower() != NodeTypes::Agent) {
         if (m_tabs != nullptr) {
             m_tabs->setTabEnabled(1, false);
             m_tabs->setCurrentIndex(0);
@@ -52,15 +58,15 @@ void NodeInspector::displayNode(const domain::Node& node, const QJsonObject& sel
         m_agentTitleEdit->setText(node.name);
         m_agentDescriptionEdit->setText(node.description);
         m_agentTimeoutEdit->setText(QString::number(node.runtime.timeoutMs));
-        m_agentTemplateEdit->setText(node.config.value("io_template").toString("data_to_data"));
-        m_agentUrlEdit->setText(node.config.value("agent_url").toString());
-        m_agentModelEdit->setText(node.config.value("agent_model").toString());
-        m_agentApiKeyEdit->setText(node.config.value("agent_api_key").toString());
+        m_agentTemplateEdit->setText(config.ioTemplate());
+        m_agentUrlEdit->setText(config.agentUrl());
+        m_agentModelEdit->setText(config.agentModel());
+        m_agentApiKeyEdit->setText(config.agentApiKey());
         m_agentMaxRetriesEdit->setText(QString::number(
-            node.config.value("agent_max_retries").toInt(PythonCodeTemplates::defaultAgentMaxRetries())));
-        m_agentBackgroundPromptEdit->setPlainText(node.config.value("agent_background_prompt").toString(
+            config.agentMaxRetries(PythonCodeTemplates::defaultAgentMaxRetries())));
+        m_agentBackgroundPromptEdit->setPlainText(config.agentBackgroundPrompt(
             PythonCodeTemplates::defaultAgentBackgroundPrompt()));
-        m_agentTaskPromptEdit->setPlainText(node.config.value("agent_task_prompt").toString(
+        m_agentTaskPromptEdit->setPlainText(config.agentTaskPrompt(
             PythonCodeTemplates::defaultAgentTaskPrompt()));
     }
 

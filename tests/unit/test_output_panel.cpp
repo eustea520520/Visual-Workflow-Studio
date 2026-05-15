@@ -9,7 +9,7 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 
-#include "execution/ExecutionEngine.h"
+#include "execution/WorkflowExecutionResult.h"
 
 namespace {
 

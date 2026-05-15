@@ -1,13 +1,10 @@
 #pragma once
 
 #include "workers/INodeWorker.h"
+#include "workers/PythonNodeOutputStore.h"
+#include "workers/PythonProcessRunner.h"
 
-#include <QHash>
-#include <QMutex>
-#include <QSet>
 #include <QString>
-
-class QProcess;
 
 namespace vws::workers {
 
@@ -40,18 +37,10 @@ private:
         const QString& message,
         const QString& stderrText = QString(),
         const QString& errorStack = QString()) const;
-    bool saveNodeOutput(
-        const execution::NodeExecutionRequest& request,
-        const execution::NodeExecutionResult& result,
-        QString* errorMessage) const;
-    bool validateArtifactsExist(
-        const execution::NodeExecutionResult& result,
-        QString* errorMessage) const;
-
     QString m_pythonExecutable;
     QString m_workerScriptPath;
-    mutable QMutex m_processMutex;
-    QHash<QString, QSet<QProcess*>> m_runningProcessesByRun;
+    PythonProcessRunner m_processRunner;
+    PythonNodeOutputStore m_outputStore;
 };
 
 } // namespace vws::workers

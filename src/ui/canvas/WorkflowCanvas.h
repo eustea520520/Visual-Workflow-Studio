@@ -1,15 +1,14 @@
-#pragma once
+﻿#pragma once
 
+#include "application/WorkflowClipboard.h"
+#include "application/WorkflowHistory.h"
 #include "domain/Workflow.h"
 #include "ui/canvas/NodeGraphicsItem.h"
-#include "ui/editor/PythonCodeTemplates.h"
 
 #include <QGraphicsView>
-#include <QHash>
 #include <QList>
 #include <optional>
 #include <QPointF>
-#include <QRectF>
 #include <QString>
 
 class QGraphicsScene;
@@ -21,7 +20,7 @@ class QWheelEvent;
 
 namespace vws::ui {
 
-class EdgeGraphicsItem;
+class WorkflowSceneController;
 
 // 中央工作流画布。
 //
@@ -69,12 +68,6 @@ protected:
     void dropEvent(QDropEvent* event) override;
 
 private:
-    enum class StarterTemplateKind {
-        EmptyOutput,
-        DataOutput,
-        FileOutput,
-    };
-
     void buildScene();
     void rebuildSceneFromWorkflow();
     void addNodeItem(const domain::Node& node);
@@ -82,8 +75,6 @@ private:
     bool createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId);
     void updateEdgesForNode(const QString& nodeId);
     void updateAllEdgeRoutes();
-    QList<QRectF> nodeObstacleRectsForEdge(const domain::Edge& edge) const;
-    int parallelEdgeIndex(const domain::Edge& edge) const;
     void clearEdgeDragState();
     void deleteSelectedItems();
     void removeEdge(const QString& edgeId);
@@ -92,9 +83,6 @@ private:
     void pushUndoState();
     void undoLastChange();
     void zoomAtCursor(int wheelDelta);
-    domain::Node createStarterNode(const QPointF& scenePos, StarterTemplateKind templateKind = StarterTemplateKind::DataOutput) const;
-    domain::Node createFunctionNode(const QPointF& scenePos, DataTransferTemplate templateKind = DataTransferTemplate::DataToData) const;
-    domain::Node createAgentNode(const QPointF& scenePos, DataTransferTemplate templateKind = DataTransferTemplate::DataToData) const;
     NodeGraphicsItem* outputNodeAt(const QPointF& scenePos) const;
     NodeGraphicsItem* inputNodeAt(const QPointF& scenePos, const QString& excludedNodeId = {}) const;
     QPainterPath edgePreviewPath(const QPointF& start, const QPointF& end) const;
@@ -105,20 +93,16 @@ private:
     void pasteClipboardNodes();
 
     QGraphicsScene* m_scene = nullptr;
+    WorkflowSceneController* m_sceneController = nullptr;
     domain::Workflow m_workflow;
-    QHash<QString, NodeGraphicsItem*> m_nodeItems;
-    QHash<QString, EdgeGraphicsItem*> m_edgeItems;
-    QList<domain::Workflow> m_undoStack;
-    bool m_restoringHistory = false;
+    application::WorkflowHistory m_history;
     NodeGraphicsItem* m_edgeDragSource = nullptr;
     QGraphicsPathItem* m_edgePreviewItem = nullptr;
     QPointF m_edgeDragStartScenePos;
     bool m_rightButtonPanning = false;
     QPoint m_lastPanViewportPos;
     Qt::CursorShape m_previousCursor = Qt::ArrowCursor;
-    domain::Workflow m_clipboardWorkflow;
-    bool m_hasClipboardNodes = false;
-    int m_pasteCount = 0;
+    application::WorkflowClipboard m_clipboard;
 };
 
 } // namespace vws::ui

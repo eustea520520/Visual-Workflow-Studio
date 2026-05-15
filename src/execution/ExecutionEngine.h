@@ -1,16 +1,13 @@
 #pragma once
 
 #include "domain/Workflow.h"
+#include "execution/ExecutionCancellationState.h"
 #include "execution/ExecutionEventBus.h"
-#include "execution/NodeExecutionResult.h"
+#include "execution/WorkflowExecutionResult.h"
 
-#include <QHash>
-#include <QMutex>
 #include <QObject>
 #include <QThreadPool>
 #include <QString>
-#include <QStringList>
-#include <atomic>
 #include <functional>
 
 namespace vws::workers {
@@ -19,19 +16,8 @@ class WorkerRegistry;
 
 namespace vws::execution {
 
-// 一次工作流执行的内存结果摘要。
-// 后续 RunService 会把这里的信息转成 RunRecord / NodeRunRecord 并持久化。
-struct WorkflowExecutionResult {
-    QString runId;
-    bool success = false;
-    QString status;
-    QStringList errors;
-    QHash<QString, QString> nodeStatuses;
-    QHash<QString, NodeExecutionResult> nodeResults;
-};
-
-// ExecutionEngine 是工作流运行主控。
-// 它负责串起：图校验 -> DAG 调度 -> Worker 执行 -> 状态事件 -> 执行结果。
+// 工作流运行主控：负责图校验、DAG 调度、Worker 执行和事件发布。
+// 单次运行的临时状态放在 ExecutionRunState 中，避免引擎对象长期持有运行结果。
 class ExecutionEngine {
 public:
     explicit ExecutionEngine(workers::WorkerRegistry& workerRegistry);
@@ -57,9 +43,7 @@ private:
     workers::WorkerRegistry& m_workerRegistry;
     ExecutionEventBus m_eventBus;
     QThreadPool m_runPool;
-    mutable QMutex m_runControlMutex;
-    QString m_currentRunId;
-    std::atomic_bool m_cancelRequested = false;
+    ExecutionCancellationState m_cancellationState;
 };
 
 } // namespace vws::execution

@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 
-#include "ui/editor/PythonCodeTemplates.h"
+#include "application/PythonCodeTemplates.h"
 
 #include <QDialog>
 #include <QJsonObject>
@@ -15,6 +15,7 @@ class QVBoxLayout;
 namespace vws::ui {
 
 class PythonCodeEditor;
+using DataTransferTemplate = application::DataTransferTemplate;
 
 // Dialog for editing node metadata, optional Agent settings, and Python code.
 class PythonNodeEditorDialog final : public QDialog {

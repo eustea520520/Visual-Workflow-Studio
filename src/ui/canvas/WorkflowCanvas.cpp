@@ -1,7 +1,10 @@
-#include "ui/canvas/WorkflowCanvas.h"
+﻿#include "ui/canvas/WorkflowCanvas.h"
 
+#include "application/NodeFactory.h"
+#include "application/WorkflowEditService.h"
 #include "ui/canvas/EdgeGraphicsItem.h"
-#include "ui/editor/PythonCodeTemplates.h"
+#include "ui/canvas/WorkflowCanvasContextMenu.h"
+#include "ui/canvas/WorkflowSceneController.h"
 #include "ui/theme/ThemeManager.h"
 
 #include <QContextMenuEvent>
@@ -14,8 +17,6 @@
 #include <QGraphicsScene>
 #include <QKeyEvent>
 #include <QKeySequence>
-#include <QLineF>
-#include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -24,10 +25,12 @@
 #include <QScrollBar>
 #include <QSet>
 #include <QSignalBlocker>
-#include <QUuid>
 #include <QWheelEvent>
 
 namespace vws::ui {
+
+using application::DataTransferTemplate;
+using StarterTemplateKind = application::NodeFactory::StarterTemplateKind;
 
 namespace {
 
@@ -43,6 +46,14 @@ WorkflowCanvas::WorkflowCanvas(QWidget* parent)
 {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
+    m_sceneController = new WorkflowSceneController(m_scene, this);
+    connect(m_sceneController, &WorkflowSceneController::nodeMoved, this, [this](const QString& nodeId) {
+        updateEdgesForNode(nodeId);
+        syncWorkflowFromItems();
+        emit workflowChanged(m_workflow);
+    });
+    connect(m_sceneController, &WorkflowSceneController::nodeSelected, this, &WorkflowCanvas::nodeSelected);
+    connect(m_sceneController, &WorkflowSceneController::nodeDoubleClicked, this, &WorkflowCanvas::nodeDoubleClicked);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this]() {
         for (auto* item : m_scene->selectedItems()) {
             if (dynamic_cast<NodeGraphicsItem*>(item) != nullptr) {
@@ -70,7 +81,7 @@ WorkflowCanvas::~WorkflowCanvas()
 void WorkflowCanvas::setWorkflow(const domain::Workflow& workflow)
 {
     m_workflow = workflow;
-    m_undoStack.clear();
+    m_history.clear();
     rebuildSceneFromWorkflow();
     if (!m_workflow.nodes.isEmpty()) {
         const auto firstNode = m_workflow.nodes.first();
@@ -82,59 +93,52 @@ void WorkflowCanvas::setWorkflow(const domain::Workflow& workflow)
 domain::Workflow WorkflowCanvas::workflow() const
 {
     auto workflow = m_workflow;
-    for (const auto& nodeId : m_nodeItems.keys()) {
-        const auto* item = m_nodeItems.value(nodeId);
-        for (auto& node : workflow.nodes) {
-            if (node.nodeId == nodeId) {
-                node = item->node();
-                break;
-            }
-        }
+    if (m_sceneController != nullptr) {
+        m_sceneController->syncWorkflowNodes(workflow);
     }
     return workflow;
 }
 
 std::optional<domain::Node> WorkflowCanvas::selectedNode() const
 {
-    for (auto* item : m_scene->selectedItems()) {
-        if (auto* nodeItem = dynamic_cast<NodeGraphicsItem*>(item)) {
-            return nodeItem->node();
-        }
-    }
-    return std::nullopt;
+    return m_sceneController != nullptr ? m_sceneController->selectedNode() : std::nullopt;
 }
 
 void WorkflowCanvas::addNode(const domain::Node& node)
 {
     pushUndoState();
-    auto nodeToAdd = node;
-    if (nodeToAdd.nodeId.isEmpty()) {
-        nodeToAdd.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    }
-
-    m_workflow.nodes.append(nodeToAdd);
+    const auto nodeToAdd = application::WorkflowEditService::addNode(m_workflow, node);
     addNodeItem(nodeToAdd);
     updateAllEdgeRoutes();
-    m_scene->clearSelection();
-    if (auto* item = m_nodeItems.value(nodeToAdd.nodeId, nullptr)) {
-        item->setSelected(true);
+    if (m_sceneController != nullptr) {
+        m_sceneController->clearSelection();
+        m_sceneController->selectNode(nodeToAdd.nodeId);
     }
     emit workflowChanged(workflow());
 }
 
 void WorkflowCanvas::addStarterNodeAt(const QPointF& scenePos)
 {
-    addNode(createStarterNode(scenePos, StarterTemplateKind::DataOutput));
+    addNode(application::NodeFactory::createStarterNode(
+        scenePos,
+        m_workflow.nodes.size(),
+        StarterTemplateKind::DataOutput));
 }
 
 void WorkflowCanvas::addFunctionNodeAt(const QPointF& scenePos)
 {
-    addNode(createFunctionNode(scenePos, DataTransferTemplate::DataToData));
+    addNode(application::NodeFactory::createFunctionNode(
+        scenePos,
+        m_workflow.nodes.size(),
+        DataTransferTemplate::DataToData));
 }
 
 void WorkflowCanvas::addAgentNodeAt(const QPointF& scenePos)
 {
-    addNode(createAgentNode(scenePos, DataTransferTemplate::DataToData));
+    addNode(application::NodeFactory::createAgentNode(
+        scenePos,
+        m_workflow.nodes.size(),
+        DataTransferTemplate::DataToData));
 }
 
 bool WorkflowCanvas::connectSelectedNodes()
@@ -155,28 +159,25 @@ bool WorkflowCanvas::connectSelectedNodes()
 
 bool WorkflowCanvas::createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId)
 {
-    auto* sourceItem = m_nodeItems.value(sourceNodeId, nullptr);
-    auto* targetItem = m_nodeItems.value(targetNodeId, nullptr);
+    auto* sourceItem = m_sceneController != nullptr ? m_sceneController->nodeItem(sourceNodeId) : nullptr;
+    auto* targetItem = m_sceneController != nullptr ? m_sceneController->nodeItem(targetNodeId) : nullptr;
     if (sourceItem == nullptr || targetItem == nullptr || sourceNodeId == targetNodeId) {
         return false;
     }
-
-    const auto fromNode = sourceItem->node();
-    const auto toNode = targetItem->node();
-    if (fromNode.outputPorts.isEmpty() || toNode.inputPorts.isEmpty()) {
+    if (sourceItem->node().outputPorts.isEmpty() || targetItem->node().inputPorts.isEmpty()) {
         return false;
     }
 
     pushUndoState();
 
     domain::Edge edge;
-    edge.edgeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    edge.fromNode = fromNode.nodeId;
-    edge.fromPort = fromNode.outputPorts.first();
-    edge.toNode = toNode.nodeId;
-    edge.toPort = toNode.inputPorts.first();
-
-    m_workflow.edges.append(edge);
+    if (!application::WorkflowEditService::connectNodes(
+            m_workflow,
+            sourceItem->node(),
+            targetItem->node(),
+            edge)) {
+        return false;
+    }
     addEdgeItem(edge);
     emit workflowChanged(workflow());
     return true;
@@ -186,130 +187,69 @@ void WorkflowCanvas::clearWorkflow()
 {
     pushUndoState();
     m_workflow = {};
-    m_undoStack.clear();
+    m_history.clear();
     rebuildSceneFromWorkflow();
     emit workflowChanged(m_workflow);
 }
 
 bool WorkflowCanvas::updateNode(const domain::Node& node)
 {
-    auto* item = m_nodeItems.value(node.nodeId, nullptr);
+    auto* item = m_sceneController != nullptr ? m_sceneController->nodeItem(node.nodeId) : nullptr;
     if (item == nullptr) {
         return false;
     }
 
-    for (auto& workflowNode : m_workflow.nodes) {
-        if (workflowNode.nodeId != node.nodeId) {
-            continue;
-        }
-
-        // 只替换这个节点的数据，不重建整张 QGraphicsScene。
-        // 代码编辑器保存时只改变 config.code；整场景重建会删除图元，
-        // 容易和 Qt 当前正在分发的选择/鼠标/对话框信号交错，导致闪退。
-        pushUndoState();
-        workflowNode = node;
-
-        // 保存代码只改变节点数据，不应该触发选择变化或拖线状态变化。
-        // 这里显式屏蔽 scene 信号，避免 Qt 在图元刷新过程中同步分发 selectionChanged。
-        const QSignalBlocker sceneBlocker(m_scene);
-        item->setNode(node);
-        updateAllEdgeRoutes();
-        return true;
+    // 只替换这个节点的数据，不重建整张 QGraphicsScene。
+    // 代码编辑器保存时只改变 config.code；整场景重建会删除图元，
+    // 容易和 Qt 当前正在分发的选择/鼠标/对话框信号交错，导致闪退。
+    pushUndoState();
+    if (!application::WorkflowEditService::updateNode(m_workflow, node)) {
+        return false;
     }
 
-    return false;
+    // 保存代码只改变节点数据，不应该触发选择变化或拖线状态变化。
+    // 这里显式屏蔽 scene 信号，避免 Qt 在图元刷新过程中同步分发 selectionChanged。
+    const QSignalBlocker sceneBlocker(m_scene);
+    item->setNode(node);
+    updateAllEdgeRoutes();
+    return true;
 }
 
 void WorkflowCanvas::setNodeStatus(const QString& nodeId, const QString& status)
 {
-    auto* nodeItem = m_nodeItems.value(nodeId, nullptr);
-    if (nodeItem == nullptr) {
+    if (m_sceneController == nullptr) {
         return;
     }
 
-    nodeItem->setVisualState(visualStateFromStatus(status));
+    m_sceneController->setNodeStatus(nodeId, visualStateFromStatus(status));
 }
 
 void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
     const auto scenePos = mapToScene(event->pos());
+    const auto action = WorkflowCanvasContextMenu::exec(
+        this,
+        event->globalPos(),
+        m_scene->selectedItems().size() == 2,
+        !m_scene->selectedItems().isEmpty());
 
-    QMenu menu(this);
-    auto* starterMenu = menu.addMenu(tr("Add Starter Node"));
-    auto* addStarterEmptyAction = starterMenu->addAction(tr("Empty Output"));
-    auto* addStarterDataAction = starterMenu->addAction(tr("Business Data Output"));
-    auto* addStarterFileAction = starterMenu->addAction(tr("File Output"));
-
-    auto* functionMenu = menu.addMenu(tr("Add Function Node"));
-    auto* addFunctionDataToDataAction = functionMenu->addAction(tr("Data to Data"));
-    auto* addFunctionDataToFileAction = functionMenu->addAction(tr("Data to File"));
-    auto* addFunctionFileToDataAction = functionMenu->addAction(tr("File to Data"));
-    auto* addFunctionFileToFileAction = functionMenu->addAction(tr("File to File"));
-
-    auto* agentMenu = menu.addMenu(tr("Add Agent Node"));
-    auto* addAgentDataToDataAction = agentMenu->addAction(tr("Data to Data"));
-    auto* addAgentDataToFileAction = agentMenu->addAction(tr("Data to File"));
-    auto* addAgentFileToDataAction = agentMenu->addAction(tr("File to Data"));
-    auto* addAgentFileToFileAction = agentMenu->addAction(tr("File to File"));
-    menu.addSeparator();
-
-    auto* connectAction = menu.addAction(tr("Connect Selected Nodes"));
-    connectAction->setEnabled(m_scene->selectedItems().size() == 2);
-
-    auto* deleteAction = menu.addAction(tr("Delete Selected"));
-    deleteAction->setEnabled(!m_scene->selectedItems().isEmpty());
-
-    const auto* selectedAction = menu.exec(event->globalPos());
-    if (selectedAction == addStarterEmptyAction) {
-        addNode(createStarterNode(scenePos, StarterTemplateKind::EmptyOutput));
+    switch (action.type) {
+    case WorkflowCanvasContextAction::Type::AddStarter:
+        addNode(application::NodeFactory::createStarterNode(scenePos, m_workflow.nodes.size(), action.starterTemplate));
         return;
-    }
-    if (selectedAction == addStarterDataAction) {
-        addNode(createStarterNode(scenePos, StarterTemplateKind::DataOutput));
+    case WorkflowCanvasContextAction::Type::AddFunction:
+        addNode(application::NodeFactory::createFunctionNode(scenePos, m_workflow.nodes.size(), action.dataTransferTemplate));
         return;
-    }
-    if (selectedAction == addStarterFileAction) {
-        addNode(createStarterNode(scenePos, StarterTemplateKind::FileOutput));
+    case WorkflowCanvasContextAction::Type::AddAgent:
+        addNode(application::NodeFactory::createAgentNode(scenePos, m_workflow.nodes.size(), action.dataTransferTemplate));
         return;
-    }
-    if (selectedAction == addFunctionDataToDataAction) {
-        addNode(createFunctionNode(scenePos, DataTransferTemplate::DataToData));
-        return;
-    }
-    if (selectedAction == addFunctionDataToFileAction) {
-        addNode(createFunctionNode(scenePos, DataTransferTemplate::DataToFile));
-        return;
-    }
-    if (selectedAction == addFunctionFileToDataAction) {
-        addNode(createFunctionNode(scenePos, DataTransferTemplate::FileToData));
-        return;
-    }
-    if (selectedAction == addFunctionFileToFileAction) {
-        addNode(createFunctionNode(scenePos, DataTransferTemplate::FileToFile));
-        return;
-    }
-    if (selectedAction == addAgentDataToDataAction) {
-        addNode(createAgentNode(scenePos, DataTransferTemplate::DataToData));
-        return;
-    }
-    if (selectedAction == addAgentDataToFileAction) {
-        addNode(createAgentNode(scenePos, DataTransferTemplate::DataToFile));
-        return;
-    }
-    if (selectedAction == addAgentFileToDataAction) {
-        addNode(createAgentNode(scenePos, DataTransferTemplate::FileToData));
-        return;
-    }
-    if (selectedAction == addAgentFileToFileAction) {
-        addNode(createAgentNode(scenePos, DataTransferTemplate::FileToFile));
-        return;
-    }
-    if (selectedAction == connectAction) {
+    case WorkflowCanvasContextAction::Type::ConnectSelected:
         connectSelectedNodes();
         return;
-    }
-    if (selectedAction == deleteAction) {
+    case WorkflowCanvasContextAction::Type::DeleteSelected:
         deleteSelectedItems();
+        return;
+    case WorkflowCanvasContextAction::Type::None:
         return;
     }
 }
@@ -468,10 +408,14 @@ void WorkflowCanvas::buildScene()
 
 void WorkflowCanvas::rebuildSceneFromWorkflow()
 {
+    // Rebuilding deletes every QGraphicsItem through QGraphicsScene::clear().
+    // Block scene signals during the rebuild so selectionChanged cannot fire
+    // while the item maps are intentionally empty.
+    const QSignalBlocker sceneBlocker(m_scene);
     clearEdgeDragState();
-    m_nodeItems.clear();
-    m_edgeItems.clear();
-    m_scene->clear();
+    if (m_sceneController != nullptr) {
+        m_sceneController->clear();
+    }
     buildScene();
 
     for (const auto& node : m_workflow.nodes) {
@@ -485,35 +429,16 @@ void WorkflowCanvas::rebuildSceneFromWorkflow()
 
 void WorkflowCanvas::addNodeItem(const domain::Node& node)
 {
-    auto* item = new NodeGraphicsItem(node);
-    m_scene->addItem(item);
-    m_nodeItems.insert(node.nodeId, item);
-
-    connect(item, &NodeGraphicsItem::nodeMoved, this, [this](const QString& nodeId, const QPointF&) {
-        updateEdgesForNode(nodeId);
-        syncWorkflowFromItems();
-        emit workflowChanged(m_workflow);
-    });
-    connect(item, &NodeGraphicsItem::nodeSelected, this, [this](const domain::Node& selectedNode) {
-        emit nodeSelected(selectedNode);
-    });
-    connect(item, &NodeGraphicsItem::nodeDoubleClicked, this, [this](const domain::Node& node) {
-        emit nodeDoubleClicked(node);
-    });
+    if (m_sceneController != nullptr) {
+        m_sceneController->addNodeItem(node);
+    }
 }
 
 void WorkflowCanvas::addEdgeItem(const domain::Edge& edge)
 {
-    auto* sourceNode = m_nodeItems.value(edge.fromNode, nullptr);
-    auto* targetNode = m_nodeItems.value(edge.toNode, nullptr);
-    if (sourceNode == nullptr || targetNode == nullptr) {
-        return;
+    if (m_sceneController != nullptr) {
+        m_sceneController->addEdgeItem(edge, m_workflow);
     }
-
-    auto* item = new EdgeGraphicsItem(edge, sourceNode, targetNode);
-    m_scene->addItem(item);
-    m_edgeItems.insert(edge.edgeId, item);
-    item->setRoutingContext(nodeObstacleRectsForEdge(edge), parallelEdgeIndex(edge));
 }
 
 void WorkflowCanvas::updateEdgesForNode(const QString& nodeId)
@@ -524,40 +449,9 @@ void WorkflowCanvas::updateEdgesForNode(const QString& nodeId)
 
 void WorkflowCanvas::updateAllEdgeRoutes()
 {
-    for (auto* edgeItem : m_edgeItems) {
-        const auto edge = edgeItem->edge();
-        edgeItem->setRoutingContext(nodeObstacleRectsForEdge(edge), parallelEdgeIndex(edge));
+    if (m_sceneController != nullptr) {
+        m_sceneController->updateAllEdgeRoutes(m_workflow);
     }
-}
-
-QList<QRectF> WorkflowCanvas::nodeObstacleRectsForEdge(const domain::Edge& edge) const
-{
-    QList<QRectF> rects;
-    for (auto* nodeItem : m_nodeItems) {
-        if (nodeItem == nullptr) {
-            continue;
-        }
-        const auto nodeId = nodeItem->nodeId();
-        if (nodeId == edge.fromNode || nodeId == edge.toNode) {
-            continue;
-        }
-        rects.append(nodeItem->bodySceneRect());
-    }
-    return rects;
-}
-
-int WorkflowCanvas::parallelEdgeIndex(const domain::Edge& edge) const
-{
-    int index = 0;
-    for (const auto& existingEdge : m_workflow.edges) {
-        if (existingEdge.edgeId == edge.edgeId) {
-            return index;
-        }
-        if (existingEdge.fromNode == edge.fromNode && existingEdge.toNode == edge.toNode) {
-            ++index;
-        }
-    }
-    return index;
 }
 
 void WorkflowCanvas::clearEdgeDragState()
@@ -606,17 +500,11 @@ void WorkflowCanvas::deleteSelectedItems()
 
 void WorkflowCanvas::removeEdge(const QString& edgeId)
 {
-    auto* item = m_edgeItems.take(edgeId);
-    if (item != nullptr) {
-        m_scene->removeItem(item);
-        delete item;
+    if (m_sceneController != nullptr) {
+        m_sceneController->removeEdgeItem(edgeId);
     }
 
-    for (qsizetype index = m_workflow.edges.size() - 1; index >= 0; --index) {
-        if (m_workflow.edges.at(index).edgeId == edgeId) {
-            m_workflow.edges.removeAt(index);
-        }
-    }
+    application::WorkflowEditService::removeEdges(m_workflow, QSet<QString>{edgeId});
 }
 
 void WorkflowCanvas::removeNode(const QString& nodeId)
@@ -625,65 +513,46 @@ void WorkflowCanvas::removeNode(const QString& nodeId)
         clearEdgeDragState();
     }
 
-    QStringList connectedEdges;
-    for (const auto& edgeId : m_edgeItems.keys()) {
-        if (m_edgeItems.value(edgeId)->touchesNode(nodeId)) {
-            connectedEdges.append(edgeId);
-        }
-    }
+    const auto connectedEdges = m_sceneController != nullptr
+        ? m_sceneController->connectedEdgeIdsForNode(nodeId)
+        : QStringList();
 
     for (const auto& edgeId : connectedEdges) {
         removeEdge(edgeId);
     }
 
-    auto* item = m_nodeItems.take(nodeId);
-    if (item != nullptr) {
-        m_scene->removeItem(item);
-        delete item;
+    if (m_sceneController != nullptr) {
+        m_sceneController->removeNodeItem(nodeId);
     }
 
-    for (qsizetype index = m_workflow.nodes.size() - 1; index >= 0; --index) {
-        if (m_workflow.nodes.at(index).nodeId == nodeId) {
-            m_workflow.nodes.removeAt(index);
-        }
-    }
+    application::WorkflowEditService::removeNodes(m_workflow, QSet<QString>{nodeId});
     updateAllEdgeRoutes();
 }
 
 void WorkflowCanvas::syncWorkflowFromItems()
 {
-    for (auto& node : m_workflow.nodes) {
-        auto* item = m_nodeItems.value(node.nodeId, nullptr);
-        if (item != nullptr) {
-            node = item->node();
-        }
+    if (m_sceneController != nullptr) {
+        m_sceneController->syncWorkflowNodes(m_workflow);
     }
 }
 
 void WorkflowCanvas::pushUndoState()
 {
-    if (m_restoringHistory) {
-        return;
-    }
-
     syncWorkflowFromItems();
-    m_undoStack.append(m_workflow);
-    constexpr int MaxUndoStates = 50;
-    while (m_undoStack.size() > MaxUndoStates) {
-        m_undoStack.removeFirst();
-    }
+    m_history.push(m_workflow);
 }
 
 void WorkflowCanvas::undoLastChange()
 {
-    if (m_undoStack.isEmpty()) {
+    const auto snapshot = m_history.takeUndoSnapshot();
+    if (!snapshot.has_value()) {
         return;
     }
 
-    m_restoringHistory = true;
-    m_workflow = m_undoStack.takeLast();
+    m_history.setRestoring(true);
+    m_workflow = snapshot.value();
     rebuildSceneFromWorkflow();
-    m_restoringHistory = false;
+    m_history.setRestoring(false);
     emit workflowChanged(m_workflow);
 }
 
@@ -703,113 +572,18 @@ void WorkflowCanvas::zoomAtCursor(int wheelDelta)
     scale(factor, factor);
 }
 
-domain::Node WorkflowCanvas::createFunctionNode(const QPointF& scenePos, DataTransferTemplate templateKind) const
-{
-    domain::Node node;
-    node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    node.type = "function";
-    node.name = tr("Function Node %1").arg(m_workflow.nodes.size() + 1);
-    node.description = tr("Python function node created from the canvas context menu.");
-    node.position.x = scenePos.x();
-    node.position.y = scenePos.y();
-    node.inputPorts = {"input"};
-    node.outputPorts = {"output"};
-    node.config = {
-        {"language", "python"},
-        {"entry", "run"},
-        {"io_template", PythonCodeTemplates::templateKey(templateKind)},
-        {"code", PythonCodeTemplates::codeForTemplate(templateKind)},
-    };
-    return node;
-}
-
-domain::Node WorkflowCanvas::createStarterNode(const QPointF& scenePos, StarterTemplateKind templateKind) const
-{
-    domain::Node node;
-    node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    node.type = "starter";
-    node.name = tr("Starter Node %1").arg(m_workflow.nodes.size() + 1);
-    node.description = tr("Output-only starter node created from the canvas context menu.");
-    node.position.x = scenePos.x();
-    node.position.y = scenePos.y();
-    node.inputPorts = {};
-    node.outputPorts = {"output"};
-    DataTransferTemplate codeTemplate = DataTransferTemplate::DataOutput;
-    if (templateKind == StarterTemplateKind::EmptyOutput) {
-        codeTemplate = DataTransferTemplate::EmptyOutput;
-    } else if (templateKind == StarterTemplateKind::FileOutput) {
-        codeTemplate = DataTransferTemplate::FileOutput;
-    }
-
-    node.config = {
-        {"language", "python"},
-        {"entry", "run"},
-        {"io_template", PythonCodeTemplates::templateKey(codeTemplate)},
-        {"code", PythonCodeTemplates::codeForTemplate(codeTemplate)},
-    };
-    return node;
-}
-
-domain::Node WorkflowCanvas::createAgentNode(const QPointF& scenePos, DataTransferTemplate templateKind) const
-{
-    domain::Node node;
-    node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    node.type = "agent";
-    node.name = tr("Agent Node %1").arg(m_workflow.nodes.size() + 1);
-    node.description = tr("Agent node created from the canvas context menu.");
-    node.position.x = scenePos.x();
-    node.position.y = scenePos.y();
-    node.inputPorts = {"input"};
-    node.outputPorts = {"output"};
-    node.config = {
-        {"language", "python"},
-        {"entry", "run"},
-        {"agent_url", ""},
-        {"agent_model", ""},
-        {"agent_api_key", ""},
-        {"agent_max_retries", PythonCodeTemplates::defaultAgentMaxRetries()},
-        {"agent_background_prompt", PythonCodeTemplates::defaultAgentBackgroundPrompt()},
-        {"agent_task_prompt", PythonCodeTemplates::defaultAgentTaskPrompt()},
-        {"io_template", PythonCodeTemplates::templateKey(templateKind)},
-        {"code", PythonCodeTemplates::agentCode(
-                QString(),
-                QString(),
-                QString(),
-                PythonCodeTemplates::defaultAgentMaxRetries(),
-                PythonCodeTemplates::defaultAgentBackgroundPrompt(),
-                PythonCodeTemplates::defaultAgentTaskPrompt(),
-                templateKind)},
-    };
-    return node;
-}
-
 NodeGraphicsItem* WorkflowCanvas::outputNodeAt(const QPointF& scenePos) const
 {
-    for (auto* nodeItem : m_nodeItems) {
-        if (nodeItem->node().outputPorts.isEmpty()) {
-            continue;
-        }
-        if (QLineF(scenePos, nodeItem->outputAnchorScenePos()).length() <= PortHitRadius) {
-            return nodeItem;
-        }
-    }
-    return nullptr;
+    return m_sceneController != nullptr
+        ? m_sceneController->outputNodeAt(scenePos, PortHitRadius)
+        : nullptr;
 }
 
 NodeGraphicsItem* WorkflowCanvas::inputNodeAt(const QPointF& scenePos, const QString& excludedNodeId) const
 {
-    for (auto* nodeItem : m_nodeItems) {
-        if (!excludedNodeId.isEmpty() && nodeItem->nodeId() == excludedNodeId) {
-            continue;
-        }
-        if (nodeItem->node().inputPorts.isEmpty()) {
-            continue;
-        }
-        if (QLineF(scenePos, nodeItem->inputAnchorScenePos()).length() <= PortHitRadius) {
-            return nodeItem;
-        }
-    }
-    return nullptr;
+    return m_sceneController != nullptr
+        ? m_sceneController->inputNodeAt(scenePos, PortHitRadius, excludedNodeId)
+        : nullptr;
 }
 
 QPainterPath WorkflowCanvas::edgePreviewPath(const QPointF& start, const QPointF& end) const
@@ -852,8 +626,8 @@ void WorkflowCanvas::refreshTheme()
     auto* tm = ThemeManager::instance();
     if (m_scene != nullptr) {
         m_scene->setBackgroundBrush(tm ? tm->color("canvas-bg") : QColor("#F7F8FB"));
-        for (auto* item : m_scene->items()) {
-            item->update();
+        if (m_sceneController != nullptr) {
+            m_sceneController->refreshItems();
         }
     }
 
@@ -868,15 +642,7 @@ void WorkflowCanvas::refreshTheme()
 
 QList<NodeGraphicsItem*> WorkflowCanvas::selectedNodeItems() const
 {
-    QList<NodeGraphicsItem*> nodes;
-
-    for (auto* item : m_scene->selectedItems()) {
-        if (auto* nodeItem = dynamic_cast<NodeGraphicsItem*>(item)) {
-            nodes.append(nodeItem);
-        }
-    }
-
-    return nodes;
+    return m_sceneController != nullptr ? m_sceneController->selectedNodeItems() : QList<NodeGraphicsItem*>();
 }
 
 void WorkflowCanvas::copySelectedNodes()
@@ -887,25 +653,11 @@ void WorkflowCanvas::copySelectedNodes()
     }
 
     QSet<QString> selectedNodeIds;
-    m_clipboardWorkflow = {};
-    m_clipboardWorkflow.nodes.clear();
-    m_clipboardWorkflow.edges.clear();
-
     for (auto* item : selectedNodes) {
-        const auto node = item->node();
-        selectedNodeIds.insert(node.nodeId);
-        m_clipboardWorkflow.nodes.append(node);
+        selectedNodeIds.insert(item->nodeId());
     }
 
-    for (const auto& edge : m_workflow.edges) {
-        if (selectedNodeIds.contains(edge.fromNode) &&
-            selectedNodeIds.contains(edge.toNode)) {
-            m_clipboardWorkflow.edges.append(edge);
-        }
-    }
-
-    m_hasClipboardNodes = true;
-    m_pasteCount = 0;
+    m_clipboard.capture(m_workflow, selectedNodeIds);
 }
 
 void WorkflowCanvas::cutSelectedNodes()
@@ -920,54 +672,28 @@ void WorkflowCanvas::cutSelectedNodes()
 
 void WorkflowCanvas::pasteClipboardNodes()
 {
-    if (!m_hasClipboardNodes || m_clipboardWorkflow.nodes.isEmpty()) {
+    if (!m_clipboard.hasNodes()) {
         return;
     }
 
     pushUndoState();
 
-    ++m_pasteCount;
-    const qreal offset = 32.0 * m_pasteCount;
+    const auto duplicate = m_clipboard.createPasteSubgraph(tr(" Copy"));
 
-    QHash<QString, QString> oldToNewNodeIds;
-
-    QList<domain::Node> nodesToAdd;
-    for (auto node : m_clipboardWorkflow.nodes) {
-        const auto oldId = node.nodeId;
-        node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        node.name = tr("%1 Copy").arg(node.name);
-        node.position.x += offset;
-        node.position.y += offset;
-
-        oldToNewNodeIds.insert(oldId, node.nodeId);
-        nodesToAdd.append(node);
+    if (m_sceneController != nullptr) {
+        m_sceneController->clearSelection();
     }
 
-    QList<domain::Edge> edgesToAdd;
-    for (auto edge : m_clipboardWorkflow.edges) {
-        if (!oldToNewNodeIds.contains(edge.fromNode) ||
-            !oldToNewNodeIds.contains(edge.toNode)) {
-            continue;
-        }
-
-        edge.edgeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        edge.fromNode = oldToNewNodeIds.value(edge.fromNode);
-        edge.toNode = oldToNewNodeIds.value(edge.toNode);
-        edgesToAdd.append(edge);
-    }
-
-    m_scene->clearSelection();
-
-    for (const auto& node : nodesToAdd) {
-        m_workflow.nodes.append(node);
+    for (const auto& node : duplicate.nodes) {
         addNodeItem(node);
-        if (auto* item = m_nodeItems.value(node.nodeId, nullptr)) {
-            item->setSelected(true);
+        if (m_sceneController != nullptr) {
+            m_sceneController->selectNode(node.nodeId);
         }
     }
 
-    for (const auto& edge : edgesToAdd) {
-        m_workflow.edges.append(edge);
+    application::WorkflowEditService::appendSubgraph(m_workflow, duplicate);
+
+    for (const auto& edge : duplicate.edges) {
         addEdgeItem(edge);
     }
 

@@ -19,6 +19,16 @@ class PythonNodeWorker;
 class WorkerRegistry;
 }
 
+namespace vws::presentation {
+class AppStore;
+class NodeTemplateController;
+class PythonEnvironmentController;
+class RunController;
+class WorkspaceBrowserController;
+class WorkflowController;
+class WorkspaceController;
+}
+
 namespace vws {
 
 // AppContext 是应用的“组合根”（composition root）。
@@ -38,15 +48,17 @@ public:
     // 初始化依赖图。Starter、Function、Agent 当前都通过 PythonNodeWorker 执行。
     void initialize();
 
-    application::WorkspaceService& workspaceService();
-    application::WorkflowService& workflowService();
-    application::NodeTemplateService& nodeTemplateService();
-    application::RunService& runService();
-    execution::ExecutionEngine& executionEngine();
-    workers::WorkerRegistry& workerRegistry();
-    void setPythonExecutable(const QString& pythonExecutable);
+    presentation::AppStore& appStore();
+    presentation::WorkspaceController& workspaceController();
+    presentation::PythonEnvironmentController& pythonEnvironmentController();
+    presentation::WorkflowController& workflowController();
+    presentation::NodeTemplateController& nodeTemplateController();
+    presentation::RunController& runController();
+    presentation::WorkspaceBrowserController& workspaceBrowserController();
 
 private:
+    void setPythonExecutable(const QString& pythonExecutable);
+
     // 这些对象生命周期跟随整个应用。
     // 使用 unique_ptr 是为了表达“AppContext 独占拥有这些对象”。
     std::unique_ptr<workers::WorkerRegistry> m_workerRegistry;
@@ -56,6 +68,13 @@ private:
     std::unique_ptr<application::NodeTemplateService> m_nodeTemplateService;
     std::unique_ptr<application::RunService> m_runService;
     std::shared_ptr<workers::PythonNodeWorker> m_pythonWorker;
+    std::unique_ptr<presentation::AppStore> m_appStore;
+    std::unique_ptr<presentation::WorkspaceController> m_workspaceController;
+    std::unique_ptr<presentation::PythonEnvironmentController> m_pythonEnvironmentController;
+    std::unique_ptr<presentation::WorkflowController> m_workflowController;
+    std::unique_ptr<presentation::NodeTemplateController> m_nodeTemplateController;
+    std::unique_ptr<presentation::RunController> m_runController;
+    std::unique_ptr<presentation::WorkspaceBrowserController> m_workspaceBrowserController;
 };
 
 } // namespace vws

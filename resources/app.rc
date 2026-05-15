@@ -1,0 +1,36 @@
+IDI_ICON1               ICON    "icons/app-icon.ico"
+
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,2,0,0
+PRODUCTVERSION  0,2,0,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+FILEFLAGS       VS_FF_DEBUG
+#else
+FILEFLAGS       0
+#endif
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Visual Workflow Studio"
+            VALUE "FileDescription",  "Visual Workflow Studio - Visual DAG Workflow Builder"
+            VALUE "FileVersion",      "0.2.0"
+            VALUE "InternalName",     "visual-workflow-studio"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "visual-workflow-studio.exe"
+            VALUE "ProductName",      "Visual Workflow Studio"
+            VALUE "ProductVersion",   "0.2.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

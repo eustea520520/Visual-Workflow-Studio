@@ -18,8 +18,12 @@ Visual Workflow Studio is a C++/Qt desktop application for building and running 
 The application is split by responsibility:
 
 - `app/`: application bootstrap, dependency composition, and the main window.
+- `src/presentation/`: application UI state and controllers that translate UI intent into service/runtime calls.
 - `src/ui/`: Qt widgets, canvas items, editor widgets, inspector, workspace browser, and output panel.
+- `src/ui/canvas/WorkflowSceneController.*`: graphics-scene item indexes and graphics-item lifetime handling.
 - `src/application/`: use-case services for workspaces, workflows, node templates, and run records.
+- `src/application/WorkflowDocument.*`: in-memory current workflow document with dirty state and snapshot boundaries.
+- `src/application/NodeFactory.*` and `PythonCodeTemplates.*`: default node construction and Python template text.
 - `src/domain/`: workflow data models and JSON conversion.
 - `src/execution/`: graph validation, concurrent DAG execution, input merging, worker pool, and event bus.
 - `src/workers/`: node worker interface, registry, mock worker, and Python worker.

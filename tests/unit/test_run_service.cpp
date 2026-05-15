@@ -1,7 +1,6 @@
 #include "application/RunService.h"
 #include "domain/Workflow.h"
-#include "execution/ExecutionEngine.h"
-#include "workers/WorkerRegistry.h"
+#include "execution/WorkflowExecutionResult.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -28,9 +27,7 @@ int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
 
-    vws::workers::WorkerRegistry registry;
-    vws::execution::ExecutionEngine engine(registry);
-    vws::application::RunService runService(engine);
+    vws::application::RunService runService;
 
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {

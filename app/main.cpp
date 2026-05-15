@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QIcon>
 
 int main(int argc, char* argv[])
 {
@@ -9,8 +10,8 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setOrganizationName("Workflow");
     QApplication::setApplicationName("Visual Workflow Studio");
-
-    // AppContext 是整个程序的依赖装配中心。
+    QApplication::setWindowIcon(QIcon(":/icons/app-icon.svg"));
+    QApplication::setApplicationDisplayName("Visual Workflow Studio");
     // 服务、执行器、Worker 注册表等长期对象都在这里创建，避免散落在 UI 代码里。
     vws::AppContext appContext;
     appContext.initialize();

@@ -1,15 +1,20 @@
 #include "MainWindow.h"
 
 #include "AppContext.h"
-#include "application/NodeTemplateService.h"
-#include "application/RunService.h"
-#include "application/WorkflowService.h"
-#include "application/WorkspaceService.h"
 #include "domain/NodeTemplate.h"
-#include "execution/ExecutionEngine.h"
+#include "domain/NodeConfigView.h"
+#include "domain/NodeTypes.h"
+#include "presentation/controllers/NodeTemplateController.h"
+#include "presentation/controllers/PythonEnvironmentController.h"
+#include "presentation/controllers/RunController.h"
+#include "presentation/controllers/WorkspaceBrowserController.h"
+#include "presentation/controllers/WorkflowController.h"
+#include "presentation/controllers/WorkspaceController.h"
+#include "presentation/models/WorkflowDisplayModel.h"
+#include "presentation/state/AppStore.h"
 #include "ui/canvas/WorkflowCanvas.h"
 #include "ui/editor/PythonNodeEditorDialog.h"
-#include "ui/editor/PythonCodeTemplates.h"
+#include "application/PythonCodeTemplates.h"
 #include "ui/inspector/NodeInspector.h"
 #include "ui/output/OutputPanel.h"
 #include "ui/theme/ThemeManager.h"
@@ -21,6 +26,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonDocument>
@@ -31,6 +37,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScopedValueRollback>
 #include <QSplitter>
 #include <QStackedLayout>
 #include <QStatusBar>
@@ -39,9 +46,12 @@
 
 namespace vws {
 
+namespace NodeTypes = domain::NodeTypes;
+
 MainWindow::MainWindow(AppContext& appContext, QWidget* parent)
     : QMainWindow(parent)
     , m_appContext(appContext)
+    , m_store(appContext.appStore())
 {
     setWindowTitle("Visual Workflow Studio");
     setMinimumSize(1280, 760);
@@ -117,12 +127,12 @@ void MainWindow::buildLayout()
 
     // UI widgets emit intent; application services and the execution engine do the work.
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeSelected, this, [this](const domain::Node& node) {
-        m_selectedNodeId = node.nodeId;
-        m_nodeInspector->displayNode(node, m_nodeOutputsByNodeId.value(node.nodeId));
+        m_store.selectedNodeId() = node.nodeId;
+        m_nodeInspector->displayNode(node, m_store.nodeOutputsByNodeId().value(node.nodeId));
         updateSelectedNodeStatus(node);
     });
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeSelectionCleared, this, [this]() {
-        m_selectedNodeId.clear();
+        m_store.selectedNodeId().clear();
         if (m_nodeInspector != nullptr) {
             m_nodeInspector->clear();
         }
@@ -133,63 +143,53 @@ void MainWindow::buildLayout()
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeDoubleClicked, this, &MainWindow::openPythonNodeEditor);
     connect(m_workflowCanvas, &ui::WorkflowCanvas::saveRequested, this, &MainWindow::saveWorkflow);
     connect(m_workflowCanvas, &ui::WorkflowCanvas::workflowChanged, this, [this](const domain::Workflow& workflow) {
-        m_currentWorkflow = workflow;
+        if (m_renderingWorkflow) {
+            return;
+        }
+        m_appContext.workflowController().syncCurrentWorkflowFromView(workflow);
     });
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowActivated, this, &MainWindow::openWorkflowById);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::runActivated, this, &MainWindow::openRunById);
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeTemplateDropped,
         this, &MainWindow::addNodeFromTemplateIdAt);
-    connect(&m_appContext.executionEngine().eventBus(), &execution::ExecutionEventBus::nodeStatusChanged, this,
-        [this](const QString& runId, const QString& nodeId, const QString& status) {
-            const QString workflowId = m_workflowIdByRunId.value(runId, m_activeRunWorkflowId);
-            rememberRunWorkflow(runId, workflowId);
-            cacheNodeStatus(workflowId, nodeId, status);
-
-            if (m_currentWorkflow.workflowId == workflowId) {
+    connect(&m_appContext.runController(), &presentation::RunController::nodeStatusChanged, this,
+        [this](const QString& runId, const QString& workflowId, const QString& nodeId, const QString& status) {
+            if (m_store.currentWorkflow().workflowId == workflowId) {
                 m_workflowCanvas->setNodeStatus(nodeId, status);
                 m_outputPanel->recordNodeStatus(runId, nodeId, status);
             }
         });
-    connect(&m_appContext.executionEngine().eventBus(), &execution::ExecutionEventBus::workflowStatusChanged, this,
-        [this](const QString& runId, const QString& status) {
-            const QString workflowId = m_workflowIdByRunId.value(runId, m_activeRunWorkflowId);
-            rememberRunWorkflow(runId, workflowId);
-            if (m_currentWorkflow.workflowId == workflowId) {
+    connect(&m_appContext.runController(), &presentation::RunController::workflowStatusChanged, this,
+        [this](const QString& runId, const QString& workflowId, const QString& status) {
+            if (m_store.currentWorkflow().workflowId == workflowId) {
                 m_outputPanel->recordWorkflowStatus(runId, status);
             }
         });
-    connect(&m_appContext.executionEngine().eventBus(), &execution::ExecutionEventBus::nodeOutputReady, this,
-        [this](const QString& runId, const QString& nodeId, const QJsonObject& outputs) {
-            const QString workflowId = m_workflowIdByRunId.value(runId, m_activeRunWorkflowId);
-            rememberRunWorkflow(runId, workflowId);
-
-            if (m_currentWorkflow.workflowId != workflowId) {
+    connect(&m_appContext.runController(), &presentation::RunController::nodeOutputReady, this,
+        [this](const QString& runId, const QString& workflowId, const QString& nodeId, const QJsonObject& outputs) {
+            if (m_store.currentWorkflow().workflowId != workflowId) {
                 return;
             }
 
-            m_nodeOutputsByNodeId.insert(nodeId, outputs);
+            m_store.nodeOutputsByNodeId().insert(nodeId, outputs);
             m_outputPanel->recordNodeOutput(runId, nodeId, outputs);
 
-            if (m_selectedNodeId == nodeId) {
+            if (m_store.selectedNodeId() == nodeId) {
                 const auto selected = m_workflowCanvas->selectedNode();
                 if (selected.has_value() && selected->nodeId == nodeId) {
                     m_nodeInspector->displayNode(selected.value(), outputs);
                 }
             }
         });
-    connect(&m_appContext.executionEngine().eventBus(), &execution::ExecutionEventBus::nodeError, this,
-        [this](const QString& runId, const QString& nodeId, const QString& message) {
-            const QString workflowId = m_workflowIdByRunId.value(runId, m_activeRunWorkflowId);
-            rememberRunWorkflow(runId, workflowId);
-            if (m_currentWorkflow.workflowId == workflowId) {
+    connect(&m_appContext.runController(), &presentation::RunController::nodeError, this,
+        [this](const QString& runId, const QString& workflowId, const QString& nodeId, const QString& message) {
+            if (m_store.currentWorkflow().workflowId == workflowId) {
                 m_outputPanel->recordNodeError(runId, nodeId, message);
             }
         });
-    connect(&m_appContext.executionEngine().eventBus(), &execution::ExecutionEventBus::threadTrace, this,
-        [this](const QString& runId, const QString& nodeId, const QString& phase, const QString& threadId, const QString& threadName) {
-            const QString workflowId = m_workflowIdByRunId.value(runId, m_activeRunWorkflowId);
-            rememberRunWorkflow(runId, workflowId);
-            if (m_currentWorkflow.workflowId == workflowId) {
+    connect(&m_appContext.runController(), &presentation::RunController::threadTrace, this,
+        [this](const QString& runId, const QString& workflowId, const QString& nodeId, const QString& phase, const QString& threadId, const QString& threadName) {
+            if (m_store.currentWorkflow().workflowId == workflowId) {
                 m_outputPanel->recordThreadTrace(runId, nodeId, phase, threadId, threadName);
             }
         });
@@ -318,6 +318,26 @@ QWidget* MainWindow::buildCanvasOverlay()
     return overlay;
 }
 
+void MainWindow::renderCurrentWorkflowOnCanvas()
+{
+    if (m_workflowCanvas == nullptr) {
+        return;
+    }
+
+    QScopedValueRollback<bool> guard(m_renderingWorkflow, true);
+    m_workflowCanvas->setWorkflow(m_store.currentWorkflow());
+}
+
+void MainWindow::clearCanvasWorkflowView()
+{
+    if (m_workflowCanvas == nullptr) {
+        return;
+    }
+
+    QScopedValueRollback<bool> guard(m_renderingWorkflow, true);
+    m_workflowCanvas->clearWorkflow();
+}
+
 void MainWindow::updateCanvasOverlay()
 {
     if (m_canvasOverlay == nullptr) {
@@ -335,7 +355,7 @@ void MainWindow::updateCanvasOverlay()
     disconnect(m_overlayPrimaryButton, nullptr, this, nullptr);
     disconnect(m_overlaySecondaryButton, nullptr, this, nullptr);
 
-    if (m_currentWorkspace.rootPath.isEmpty()) {
+    if (m_store.currentWorkspace().rootPath.isEmpty()) {
         m_canvasOverlayTitle->setText(tr("No workspace is open"));
         m_overlayPrimaryButton->setText(tr("New Workspace"));
         m_overlaySecondaryButton->setText(tr("Open Workspace"));
@@ -351,10 +371,10 @@ void MainWindow::updateCanvasOverlay()
     }
 
     if (m_commandBar != nullptr) {
-        m_commandBar->setWorkspaceInfo(m_currentWorkspace.name);
+        m_commandBar->setWorkspaceInfo(m_store.currentWorkspace().name);
     }
 
-    if (m_currentWorkflow.workflowId.isEmpty()) {
+    if (m_store.currentWorkflow().workflowId.isEmpty()) {
         m_canvasOverlayTitle->setText(tr("No workflow is open"));
         m_overlayPrimaryButton->setText(tr("New Workflow"));
         m_overlaySecondaryButton->setText(tr("Open Workflow"));
@@ -369,7 +389,7 @@ void MainWindow::updateCanvasOverlay()
     }
 
     if (m_commandBar != nullptr) {
-        m_commandBar->setWorkflowInfo(m_currentWorkflow.name);
+        m_commandBar->setWorkflowInfo(m_store.currentWorkflow().name);
     }
 
     m_canvasOverlay->hide();
@@ -396,18 +416,17 @@ void MainWindow::createWorkspace()
     }
 
     QString errorMessage;
-    if (!m_appContext.workspaceService().createWorkspace(rootPath, workspaceName, m_currentWorkspace, &errorMessage)) {
+    if (!m_appContext.workspaceController().createWorkspace(rootPath, workspaceName, &errorMessage)) {
         QMessageBox::warning(this, tr("Workspace Error"), errorMessage);
         return;
     }
 
-    m_currentWorkflow = {};
-    m_workflowCanvas->clearWorkflow();
+    clearCanvasWorkflowView();
     resetInspectorAndOutput();
     applyWorkspacePythonExecutable();
     refreshWorkspaceExplorer();
     updateCanvasOverlay();
-    m_outputPanel->appendStdout(tr("Created workspace: %1").arg(m_currentWorkspace.rootPath));
+    m_outputPanel->appendStdout(tr("Created workspace: %1").arg(m_store.currentWorkspace().rootPath));
 }
 
 void MainWindow::openWorkspace()
@@ -418,18 +437,17 @@ void MainWindow::openWorkspace()
     }
 
     QString errorMessage;
-    if (!m_appContext.workspaceService().openWorkspace(rootPath, m_currentWorkspace, &errorMessage)) {
+    if (!m_appContext.workspaceController().openWorkspace(rootPath, &errorMessage)) {
         QMessageBox::warning(this, tr("Workspace Error"), errorMessage);
         return;
     }
 
-    m_currentWorkflow = {};
-    m_workflowCanvas->clearWorkflow();
+    clearCanvasWorkflowView();
     resetInspectorAndOutput();
     applyWorkspacePythonExecutable();
     refreshWorkspaceExplorer();
     updateCanvasOverlay();
-    m_outputPanel->appendStdout(tr("Opened workspace: %1").arg(m_currentWorkspace.rootPath));
+    m_outputPanel->appendStdout(tr("Opened workspace: %1").arg(m_store.currentWorkspace().rootPath));
 }
 
 void MainWindow::selectPythonInterpreter()
@@ -438,7 +456,7 @@ void MainWindow::selectPythonInterpreter()
         return;
     }
 
-    const auto currentPath = m_appContext.workspaceService().pythonExecutable(m_currentWorkspace);
+    const auto currentPath = m_appContext.pythonEnvironmentController().pythonExecutable();
     const auto selectedPath = QFileDialog::getOpenFileName(
         this,
         tr("Select Python Interpreter"),
@@ -449,12 +467,12 @@ void MainWindow::selectPythonInterpreter()
     }
 
     QString errorMessage;
-    if (!m_appContext.workspaceService().updatePythonExecutable(m_currentWorkspace, selectedPath, &errorMessage)) {
+    if (!m_appContext.pythonEnvironmentController().updatePythonExecutable(selectedPath, &errorMessage)) {
         QMessageBox::warning(this, tr("Workspace Error"), errorMessage);
         return;
     }
 
-    applyWorkspacePythonExecutable();
+    updatePythonStatus();
     m_outputPanel->appendStdout(tr("Selected Python interpreter: %1").arg(selectedPath));
 }
 
@@ -476,14 +494,14 @@ void MainWindow::createWorkflow()
         return;
     }
 
-    m_currentWorkflow = m_appContext.workflowService().createEmptyWorkflow(m_currentWorkspace.id, workflowName);
-    m_workflowCanvas->setWorkflow(m_currentWorkflow);
+    m_appContext.workflowController().createWorkflow(workflowName);
+    renderCurrentWorkflowOnCanvas();
     resetInspectorAndOutput();
-    applyCachedNodeStatusesForWorkflow(m_currentWorkflow.workflowId);
+    applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
     updateCanvasOverlay();
 
     saveWorkflow();
-    m_outputPanel->appendStdout(tr("Created workflow: %1").arg(m_currentWorkflow.name));
+    m_outputPanel->appendStdout(tr("Created workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
 void MainWindow::loadWorkflow()
@@ -495,26 +513,23 @@ void MainWindow::loadWorkflow()
     const auto filePath = QFileDialog::getOpenFileName(
         this,
         tr("Load Workflow"),
-        QDir(m_currentWorkspace.rootPath).filePath("workflows"),
+        QDir(m_store.currentWorkspace().rootPath).filePath("workflows"),
         tr("Workflow JSON (*.json);;All files (*.*)"));
     if (filePath.isEmpty()) {
         return;
     }
 
     QString errorMessage;
-    if (!m_appContext.workflowService().loadWorkflow(filePath, m_currentWorkflow, &errorMessage)) {
+    if (!m_appContext.workflowController().loadWorkflowFile(filePath, &errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
         return;
     }
 
-    if (m_currentWorkflow.workspaceId.isEmpty()) {
-        m_currentWorkflow.workspaceId = m_currentWorkspace.id;
-    }
-    m_workflowCanvas->setWorkflow(m_currentWorkflow);
+    renderCurrentWorkflowOnCanvas();
     resetInspectorAndOutput();
-    applyCachedNodeStatusesForWorkflow(m_currentWorkflow.workflowId);
+    applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
     updateCanvasOverlay();
-    m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_currentWorkflow.name));
+    m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
 void MainWindow::openWorkflowById(const QString& workflowId)
@@ -524,23 +539,16 @@ void MainWindow::openWorkflowById(const QString& workflowId)
     }
 
     QString errorMessage;
-    if (!m_appContext.workflowService().loadWorkflowFromWorkspace(
-            m_currentWorkspace.rootPath,
-            workflowId,
-            m_currentWorkflow,
-            &errorMessage)) {
+    if (!m_appContext.workflowController().loadWorkflowFromWorkspace(workflowId, &errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
         return;
     }
 
-    if (m_currentWorkflow.workspaceId.isEmpty()) {
-        m_currentWorkflow.workspaceId = m_currentWorkspace.id;
-    }
-    m_workflowCanvas->setWorkflow(m_currentWorkflow);
+    renderCurrentWorkflowOnCanvas();
     resetInspectorAndOutput();
-    applyCachedNodeStatusesForWorkflow(m_currentWorkflow.workflowId);
+    applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
     updateCanvasOverlay();
-    m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_currentWorkflow.name));
+    m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
 void MainWindow::openRunById(const QString& runId)
@@ -549,7 +557,7 @@ void MainWindow::openRunById(const QString& runId)
         return;
     }
 
-    if (m_workflowRunning) {
+    if (m_store.workflowRunning()) {
         QMessageBox::warning(
             this,
             tr("Load Run"),
@@ -558,41 +566,32 @@ void MainWindow::openRunById(const QString& runId)
     }
 
     domain::RunRecord record;
+    QHash<QString, QJsonObject> nodeOutputsByNodeId;
     QString errorMessage;
 
-    if (!m_appContext.runService().loadRunRecord(
-            m_currentWorkspace.rootPath,
+    if (!m_appContext.runController().loadRunRecordWithNodeOutputs(
             runId,
             record,
+            nodeOutputsByNodeId,
             &errorMessage)) {
         QMessageBox::warning(this, tr("Load Run"), errorMessage);
         return;
     }
 
     domain::Workflow workflowSnapshot;
-    bool loadedSnapshot = false;
+    bool usedCurrentWorkflowFile = false;
+    const auto loadedSnapshot = m_appContext.workflowController().loadWorkflowSnapshotForRun(
+        record,
+        workflowSnapshot,
+        &usedCurrentWorkflowFile,
+        &errorMessage);
 
-    if (!record.workflowSnapshotPath.trimmed().isEmpty()) {
-        loadedSnapshot = m_appContext.workflowService().loadWorkflow(
-            record.workflowSnapshotPath,
-            workflowSnapshot,
-            &errorMessage);
-    }
-
-    if (!loadedSnapshot && !record.workflowId.trimmed().isEmpty()) {
-        loadedSnapshot = m_appContext.workflowService().loadWorkflowFromWorkspace(
-            m_currentWorkspace.rootPath,
-            record.workflowId,
-            workflowSnapshot,
-            &errorMessage);
-
-        if (loadedSnapshot) {
-            QMessageBox::information(
-                this,
-                tr("Historical Run"),
-                tr("This run does not contain a workflow snapshot. "
-                   "The current workflow file was loaded instead, so the historical canvas structure may not be exact."));
-        }
+    if (loadedSnapshot && usedCurrentWorkflowFile) {
+        QMessageBox::information(
+            this,
+            tr("Historical Run"),
+            tr("This run does not contain a workflow snapshot. "
+               "The current workflow file was loaded instead, so the historical canvas structure may not be exact."));
     }
 
     if (!loadedSnapshot) {
@@ -603,47 +602,36 @@ void MainWindow::openRunById(const QString& runId)
         return;
     }
 
-    restoreRunRecordToUi(record, workflowSnapshot);
+    restoreRunRecordToUi(record, workflowSnapshot, nodeOutputsByNodeId);
 }
 
 void MainWindow::restoreRunRecordToUi(
     const domain::RunRecord& record,
-    const domain::Workflow& workflowSnapshot)
+    const domain::Workflow& workflowSnapshot,
+    const QHash<QString, QJsonObject>& nodeOutputsByNodeId)
 {
-    m_currentWorkflow = workflowSnapshot;
-    m_workflowCanvas->setWorkflow(m_currentWorkflow);
+    m_store.setCurrentWorkflow(workflowSnapshot);
+    renderCurrentWorkflowOnCanvas();
     updateCanvasOverlay();
 
     m_outputPanel->clearRun();
-    m_nodeOutputsByNodeId.clear();
-    m_outputPanel->setWorkflowName(m_currentWorkflow.name);
-
-    QHash<QString, QString> nodeNames;
-    for (const auto& node : m_currentWorkflow.nodes) {
-        nodeNames.insert(node.nodeId, node.name);
-    }
-    m_outputPanel->setNodeNames(nodeNames);
+    m_store.nodeOutputsByNodeId().clear();
+    m_store.nodeOutputsByNodeId() = nodeOutputsByNodeId;
+    const auto displayModel = presentation::WorkflowDisplayModelBuilder::build(m_store.currentWorkflow());
+    m_outputPanel->setWorkflowName(displayModel.workflowName);
+    m_outputPanel->setNodeNames(displayModel.nodeNamesById);
 
     for (const auto& nodeRun : record.nodeRuns) {
         m_workflowCanvas->setNodeStatus(nodeRun.nodeId, nodeRun.status);
     }
 
-    for (const auto& nodeRun : record.nodeRuns) {
-        QJsonObject outputObject;
-
-        if (m_appContext.runService().loadNodeOutputObject(nodeRun, outputObject, nullptr)) {
-            const auto outputs = outputObject.value("outputs").toObject();
-            m_nodeOutputsByNodeId.insert(nodeRun.nodeId, outputs);
-        }
-    }
-
-    m_outputPanel->showRunRecord(record, m_nodeOutputsByNodeId);
+    m_outputPanel->showRunRecord(record, m_store.nodeOutputsByNodeId());
 
     if (const auto selected = m_workflowCanvas->selectedNode(); selected.has_value()) {
-        m_selectedNodeId = selected->nodeId;
+        m_store.selectedNodeId() = selected->nodeId;
         m_nodeInspector->displayNode(
             selected.value(),
-            m_nodeOutputsByNodeId.value(selected->nodeId));
+            m_store.nodeOutputsByNodeId().value(selected->nodeId));
     }
 
     m_outputPanel->appendStdout(
@@ -656,16 +644,16 @@ void MainWindow::saveWorkflow()
         return;
     }
 
-    m_currentWorkflow = m_workflowCanvas->workflow();
+    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
 
     QString errorMessage;
-    if (!m_appContext.workflowService().saveWorkflowToWorkspace(m_currentWorkspace.rootPath, m_currentWorkflow, &errorMessage)) {
+    if (!m_appContext.workflowController().saveCurrentWorkflow(&errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
         return;
     }
 
     refreshWorkspaceExplorer();
-    m_outputPanel->appendStdout(tr("Saved workflow: %1").arg(m_currentWorkflow.name));
+    m_outputPanel->appendStdout(tr("Saved workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
 void MainWindow::saveSelectedNodeAsTemplate()
@@ -674,7 +662,7 @@ void MainWindow::saveSelectedNodeAsTemplate()
         return;
     }
 
-    m_currentWorkflow = m_workflowCanvas->workflow();
+    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
     const auto selectedNode = m_workflowCanvas->selectedNode();
     if (!selectedNode.has_value()) {
         QMessageBox::information(this, tr("Template Required"), tr("Select one node on the canvas before saving a template."));
@@ -693,13 +681,13 @@ void MainWindow::saveSelectedNodeAsTemplate()
         return;
     }
 
-    const auto nodeTemplate = m_appContext.nodeTemplateService().createTemplateFromNode(
-        m_currentWorkspace.id,
-        selectedNode.value(),
-        templateName);
-
+    domain::NodeTemplate nodeTemplate;
     QString errorMessage;
-    if (!m_appContext.nodeTemplateService().saveTemplate(m_currentWorkspace.rootPath, nodeTemplate, &errorMessage)) {
+    if (!m_appContext.nodeTemplateController().saveTemplateFromNode(
+            selectedNode.value(),
+            templateName,
+            &nodeTemplate,
+            &errorMessage)) {
         QMessageBox::warning(this, tr("Template Error"), errorMessage);
         return;
     }
@@ -717,21 +705,25 @@ void MainWindow::addNodeFromTemplate()
     const auto filePath = QFileDialog::getOpenFileName(
         this,
         tr("Add Node From Template"),
-        QDir(m_currentWorkspace.rootPath).filePath("node_templates"),
+        QDir(m_store.currentWorkspace().rootPath).filePath("node_templates"),
         tr("Node Template JSON (*.json);;All files (*.*)"));
     if (filePath.isEmpty()) {
         return;
     }
 
     domain::NodeTemplate nodeTemplate;
+    domain::Node node;
     QString errorMessage;
-    if (!m_appContext.nodeTemplateService().loadTemplate(filePath, nodeTemplate, &errorMessage)) {
+    if (!m_appContext.nodeTemplateController().createNodeFromTemplateFile(
+            filePath,
+            node,
+            &nodeTemplate,
+            &errorMessage)) {
         QMessageBox::warning(this, tr("Template Error"), errorMessage);
         return;
     }
 
-    auto node = m_appContext.nodeTemplateService().createNodeFromTemplate(nodeTemplate);
-    node.position.x = 80.0 * m_currentWorkflow.nodes.size();
+    node.position.x = 80.0 * m_store.currentWorkflow().nodes.size();
     node.position.y = 120.0;
     m_workflowCanvas->addNode(node);
     saveWorkflow();
@@ -770,7 +762,7 @@ void MainWindow::importNodeTemplate()
 
     domain::NodeTemplate importedTemplate;
     QString errorMessage;
-    if (!m_appContext.nodeTemplateService().importTemplateFile(filePath, m_currentWorkspace.rootPath, importedTemplate, &errorMessage)) {
+    if (!m_appContext.nodeTemplateController().importTemplateFile(filePath, &importedTemplate, &errorMessage)) {
         QMessageBox::warning(this, tr("Template Error"), errorMessage);
         return;
     }
@@ -784,66 +776,50 @@ void MainWindow::runCurrentWorkflow()
     if (!ensureWorkspaceOpen() || !ensureWorkflowOpen()) {
         return;
     }
-    if (m_workflowRunning) {
+    if (m_store.workflowRunning()) {
         m_outputPanel->appendStderr(tr("A workflow is already running."));
         return;
     }
 
-    m_currentWorkflow = m_workflowCanvas->workflow();
+    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
     applyWorkspacePythonExecutable();
-    if (m_appContext.workspaceService().pythonExecutable(m_currentWorkspace).trimmed().isEmpty()) {
+    if (m_appContext.pythonEnvironmentController().pythonExecutable().trimmed().isEmpty()) {
         QMessageBox::warning(this, tr("Run Workflow"), tr("Select a Python interpreter for this workspace before running a workflow."));
         m_outputPanel->appendStderr(tr("Run blocked: no Python interpreter selected for this workspace."));
         return;
     }
-    const auto workflowId = m_currentWorkflow.workflowId;
-    m_activeRunWorkflowId = workflowId;
-    m_nodeStatusesByWorkflowId[workflowId].clear();
-    markWorkflowRunning(workflowId, true);
-    m_outputPanel->clearRun();
-    m_nodeOutputsByNodeId.clear();
-    if (const auto selected = m_workflowCanvas->selectedNode(); selected.has_value()) {
-        m_selectedNodeId = selected->nodeId;
-        m_nodeInspector->displayNode(selected.value(), {});
-    }
-    m_outputPanel->setWorkflowName(m_currentWorkflow.name);
-    QHash<QString, QString> nodeNames;
-    for (const auto& node : m_currentWorkflow.nodes) {
-        nodeNames.insert(node.nodeId, node.name);
-    }
-    m_outputPanel->setNodeNames(nodeNames);
-
-    const auto workflowToRun = m_currentWorkflow;
-    const auto workspaceRootPath = m_currentWorkspace.rootPath;
-    const auto workspaceId = m_currentWorkspace.id;
-    const auto runRootPath = QDir(workspaceRootPath).filePath("runs");
-    const auto artifactPath = QDir(m_currentWorkspace.rootPath).filePath("artifacts");
-    if (!QDir().mkpath(artifactPath)) {
-        QMessageBox::warning(this, tr("Run Workflow"), tr("Could not create artifact directory: %1").arg(QDir::toNativeSeparators(artifactPath)));
+    presentation::WorkflowRunPlan runPlan;
+    QString runPlanError;
+    if (!m_appContext.runController().prepareCurrentWorkflowRun(runPlan, &runPlanError)) {
+        QMessageBox::warning(this, tr("Run Workflow"), runPlanError);
         return;
     }
-    m_workflowRunning = true;
+
+    refreshWorkspaceExplorer();
+    m_outputPanel->clearRun();
+    if (const auto selected = m_workflowCanvas->selectedNode(); selected.has_value()) {
+        m_store.selectedNodeId() = selected->nodeId;
+        m_nodeInspector->displayNode(selected.value(), {});
+    }
+    const auto displayModel = presentation::WorkflowDisplayModelBuilder::build(m_store.currentWorkflow());
+    m_outputPanel->setWorkflowName(displayModel.workflowName);
+    m_outputPanel->setNodeNames(displayModel.nodeNamesById);
+
     m_outputPanel->appendStdout(tr("Run started in background."));
 
-    m_appContext.executionEngine().runWorkflowAsync(
-        workflowToRun,
-        workspaceRootPath,
-        runRootPath,
-        artifactPath,
+    m_appContext.runController().runWorkflowAsync(
+        runPlan.workflow,
+        runPlan.workspaceRootPath,
+        runPlan.runRootPath,
+        runPlan.artifactPath,
         this,
-        [this, workspaceRootPath, workspaceId, workflowToRun, workflowId](execution::WorkflowExecutionResult result) {
-            m_workflowRunning = false;
-            markWorkflowRunning(workflowId, false);
-            m_activeRunWorkflowId.clear();
+        [this, runPlan](execution::WorkflowExecutionResult result) {
+            m_appContext.runController().finishRun(runPlan.workflowId);
+            refreshWorkspaceExplorer();
             m_outputPanel->showExecutionResult(result);
 
             QString runRecordError;
-            if (!m_appContext.runService().saveRunRecord(
-                    workspaceRootPath,
-                    workspaceId,
-                    workflowToRun,
-                    result,
-                    &runRecordError)) {
+            if (!m_appContext.runController().saveRunRecord(runPlan, result, &runRecordError)) {
                 m_outputPanel->appendStderr(tr("Could not save run record: %1").arg(runRecordError));
             }
 
@@ -858,20 +834,20 @@ void MainWindow::runCurrentWorkflow()
 
 void MainWindow::cancelCurrentWorkflowRun()
 {
-    if (!m_workflowRunning) {
+    if (!m_store.workflowRunning()) {
         m_outputPanel->appendStdout(tr("No workflow is currently running."));
         return;
     }
 
-    m_appContext.executionEngine().requestCancelCurrentRun();
+    m_appContext.runController().requestCancelCurrentRun();
     m_outputPanel->appendStderr(tr("Cancellation requested for the running workflow."));
 }
 
 void MainWindow::openPythonNodeEditor(const domain::Node& node)
 {
-    const auto language = node.config.value("language").toString("python");
-    const auto nodeType = node.type.trimmed().toLower();
-    const auto isPythonCodeNode = nodeType == "function" || nodeType == "starter" || nodeType == "agent";
+    const domain::NodeConfigView nodeConfig(node.config);
+    const auto language = nodeConfig.language();
+    const auto isPythonCodeNode = NodeTypes::isPythonBacked(node.type);
     if (!isPythonCodeNode || language != "python") {
         QMessageBox::information(this, tr("Python Editor"), tr("Only Python-based starter, function, and agent nodes can be edited here."));
         return;
@@ -883,8 +859,8 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
         node.runtime.timeoutMs,
         node.type,
         node.config,
-        node.config.value("code").toString(),
-        ui::PythonCodeTemplates::defaultCodeForNodeType(node.type),
+        nodeConfig.code(),
+        application::PythonCodeTemplates::defaultCodeForNodeType(node.type),
         this);
     dialog->setAttribute(Qt::WA_DeleteOnClose, true);
 
@@ -893,14 +869,21 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
         [this, nodeId = node.nodeId](const QString& name, const QString& description, int timeoutMs, const QString& code, const QJsonObject& configPatch) {
         // The save button/close prompt is also inside a UI event. Defer canvas mutation to the next event turn.
         QTimer::singleShot(0, this, [this, nodeId, name, description, timeoutMs, code, configPatch]() {
-            m_currentWorkflow = m_workflowCanvas->workflow();
+            m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
             QString errorMessage;
-            if (!m_appContext.workflowService().updateNodeDetails(m_currentWorkflow, nodeId, name, description, timeoutMs, code, configPatch, &errorMessage)) {
+            if (!m_appContext.workflowController().updateNodeDetails(
+                    nodeId,
+                    name,
+                    description,
+                    timeoutMs,
+                    code,
+                    configPatch,
+                    &errorMessage)) {
                 QMessageBox::warning(this, tr("Save Python Code"), errorMessage);
                 return;
             }
 
-            for (const auto& updatedNode : m_currentWorkflow.nodes) {
+            for (const auto& updatedNode : m_store.currentWorkflow().nodes) {
                 if (updatedNode.nodeId == nodeId) {
                     m_workflowCanvas->updateNode(updatedNode);
                     m_outputPanel->appendStdout(tr("Saved Python code for node: %1").arg(updatedNode.name));
@@ -916,50 +899,29 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
 
 void MainWindow::refreshWorkspaceExplorer()
 {
-    if (m_currentWorkspace.rootPath.isEmpty()) {
+    if (m_store.currentWorkspace().rootPath.isEmpty()) {
         return;
     }
 
-    QString errorMessage;
-    const auto workflows = m_appContext.workflowService().listWorkflows(m_currentWorkspace.rootPath, &errorMessage);
-    if (!errorMessage.isEmpty()) {
+    const auto snapshot = m_appContext.workspaceBrowserController().snapshot();
+    for (const auto& errorMessage : snapshot.errors) {
         m_outputPanel->appendStderr(errorMessage);
     }
 
-    errorMessage.clear();
-    const auto templates = m_appContext.nodeTemplateService().listTemplates(m_currentWorkspace.rootPath, &errorMessage);
-    if (!errorMessage.isEmpty()) {
-        m_outputPanel->appendStderr(errorMessage);
-    }
-
-    QStringList workflowNames;
-    QStringList workflowIds;
-    for (const auto& workflow : workflows) {
-        workflowNames.append(workflow.name.isEmpty() ? workflow.workflowId : workflow.name);
-        workflowIds.append(workflow.workflowId);
-    }
-
-    QStringList templateNames;
-    QStringList templateIds;
-    for (const auto& nodeTemplate : templates) {
-        templateNames.append(nodeTemplate.name.isEmpty() ? nodeTemplate.templateId : nodeTemplate.name);
-        templateIds.append(nodeTemplate.templateId);
-    }
-
-    const auto runEntries = m_appContext.runService().recentRunEntries(m_currentWorkspace.rootPath);
-    QStringList runNames;
-    QStringList runIds;
-    for (const auto& run : runEntries) {
-        runNames.append(run.displayName);
-        runIds.append(run.runId);
-    }
-    m_workspaceExplorer->setWorkspaceData(m_currentWorkspace.name, workflowNames, workflowIds, templateNames, templateIds, runNames, runIds, m_runningWorkflowIds);
+    m_workspaceExplorer->setWorkspaceData(
+        snapshot.workspaceName,
+        snapshot.workflowNames,
+        snapshot.workflowIds,
+        snapshot.templateNames,
+        snapshot.templateIds,
+        snapshot.runNames,
+        snapshot.runIds,
+        snapshot.runningWorkflowIds);
 }
 
 void MainWindow::applyWorkspacePythonExecutable()
 {
-    const auto pythonExecutable = m_appContext.workspaceService().pythonExecutable(m_currentWorkspace).trimmed();
-    m_appContext.setPythonExecutable(pythonExecutable);
+    m_appContext.pythonEnvironmentController().applyCurrentWorkspacePythonExecutable();
     updatePythonStatus();
 }
 
@@ -969,7 +931,7 @@ void MainWindow::updatePythonStatus()
         return;
     }
 
-    const auto pythonExecutable = m_appContext.workspaceService().pythonExecutable(m_currentWorkspace).trimmed();
+    const auto pythonExecutable = m_appContext.pythonEnvironmentController().pythonExecutable().trimmed();
     m_pythonStatusLabel->setText(pythonExecutable.isEmpty()
             ? tr("Python: not selected")
             : tr("Python: %1").arg(QDir::toNativeSeparators(pythonExecutable)));
@@ -984,7 +946,7 @@ void MainWindow::updateSelectedNodeStatus(const domain::Node& node)
 
 bool MainWindow::ensureWorkspaceOpen()
 {
-    if (!m_currentWorkspace.rootPath.isEmpty()) {
+    if (!m_store.currentWorkspace().rootPath.isEmpty()) {
         return true;
     }
 
@@ -994,7 +956,7 @@ bool MainWindow::ensureWorkspaceOpen()
 
 bool MainWindow::ensureWorkflowOpen()
 {
-    if (!m_currentWorkflow.workflowId.isEmpty()) {
+    if (!m_store.currentWorkflow().workflowId.isEmpty()) {
         return true;
     }
 
@@ -1004,8 +966,7 @@ bool MainWindow::ensureWorkflowOpen()
 
 void MainWindow::resetInspectorAndOutput()
 {
-    m_selectedNodeId.clear();
-    m_nodeOutputsByNodeId.clear();
+    m_store.resetForWorkflowChange();
 
     if (m_nodeInspector != nullptr) {
         m_nodeInspector->clear();
@@ -1020,54 +981,16 @@ void MainWindow::resetInspectorAndOutput()
     }
 }
 
-void MainWindow::rememberRunWorkflow(const QString& runId, const QString& workflowId)
-{
-    if (runId.trimmed().isEmpty() || workflowId.trimmed().isEmpty()) {
-        return;
-    }
-
-    if (!m_workflowIdByRunId.contains(runId)) {
-        m_workflowIdByRunId.insert(runId, workflowId);
-    }
-}
-
-void MainWindow::cacheNodeStatus(
-    const QString& workflowId,
-    const QString& nodeId,
-    const QString& status)
-{
-    if (workflowId.trimmed().isEmpty() || nodeId.trimmed().isEmpty()) {
-        return;
-    }
-
-    m_nodeStatusesByWorkflowId[workflowId].insert(nodeId, status);
-}
-
 void MainWindow::applyCachedNodeStatusesForWorkflow(const QString& workflowId)
 {
     if (workflowId.trimmed().isEmpty() || m_workflowCanvas == nullptr) {
         return;
     }
 
-    const auto statuses = m_nodeStatusesByWorkflowId.value(workflowId);
+    const auto statuses = m_store.nodeStatusesByWorkflowId().value(workflowId);
     for (auto it = statuses.cbegin(); it != statuses.cend(); ++it) {
         m_workflowCanvas->setNodeStatus(it.key(), it.value());
     }
-}
-
-void MainWindow::markWorkflowRunning(const QString& workflowId, bool running)
-{
-    if (workflowId.trimmed().isEmpty()) {
-        return;
-    }
-
-    if (running) {
-        m_runningWorkflowIds.insert(workflowId);
-    } else {
-        m_runningWorkflowIds.remove(workflowId);
-    }
-
-    refreshWorkspaceExplorer();
 }
 
 void MainWindow::addNodeFromTemplateIdAt(const QString& templateId, const QPointF& scenePos)
@@ -1077,18 +1000,18 @@ void MainWindow::addNodeFromTemplateIdAt(const QString& templateId, const QPoint
     }
 
     domain::NodeTemplate nodeTemplate;
+    domain::Node node;
     QString errorMessage;
 
-    if (!m_appContext.nodeTemplateService().loadTemplateFromWorkspace(
-            m_currentWorkspace.rootPath,
+    if (!m_appContext.nodeTemplateController().createNodeFromWorkspaceTemplate(
             templateId,
-            nodeTemplate,
+            node,
+            &nodeTemplate,
             &errorMessage)) {
         QMessageBox::warning(this, tr("Node Template"), errorMessage);
         return;
     }
 
-    auto node = m_appContext.nodeTemplateService().createNodeFromTemplate(nodeTemplate);
     node.position.x = scenePos.x();
     node.position.y = scenePos.y();
 

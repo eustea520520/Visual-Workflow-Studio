@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="node1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#DBEAFE"/>
+    </linearGradient>
+    <linearGradient id="node2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#DCFCE7"/>
+    </linearGradient>
+    <linearGradient id="node3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#FEF3C7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"/>
+
+  <!-- Top node (source/starter) -->
+  <rect x="88" y="36" width="80" height="44" rx="12" ry="12" fill="url(#node1)" stroke="#2563EB" stroke-width="2"/>
+  <rect x="88" y="36" width="12" height="44" rx="6" ry="6" fill="#2563EB"/>
+  <circle cx="128" cy="102" r="5" fill="#2563EB"/>
+
+  <!-- Left branch edge -->
+  <path d="M116 80 C116 100, 72 112, 72 128" fill="none" stroke="#16A34A" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="68,124 72,135 76,124" fill="#16A34A"/>
+
+  <!-- Right branch edge -->
+  <path d="M140 80 C140 100, 184 112, 184 128" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="180,124 184,135 188,124" fill="#D97706"/>
+
+  <!-- Left node -->
+  <rect x="36" y="136" width="80" height="44" rx="12" ry="12" fill="url(#node2)" stroke="#16A34A" stroke-width="2"/>
+  <rect x="36" y="136" width="12" height="44" rx="6" ry="6" fill="#16A34A"/>
+
+  <!-- Right node -->
+  <rect x="140" y="136" width="80" height="44" rx="12" ry="12" fill="url(#node3)" stroke="#D97706" stroke-width="2"/>
+  <rect x="140" y="136" width="12" height="44" rx="6" ry="6" fill="#D97706"/>
+
+  <!-- Left → bottom edge -->
+  <path d="M76 180 C76 196, 104 208, 104 216" fill="none" stroke="#16A34A" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="100,212 104,223 108,212" fill="#16A34A"/>
+
+  <!-- Right → bottom edge -->
+  <path d="M180 180 C180 196, 152 208, 152 216" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="148,212 152,223 156,212" fill="#D97706"/>
+
+  <!-- Bottom node (join/sink) -->
+  <rect x="88" y="212" width="80" height="44" rx="12" ry="12" fill="url(#node1)" stroke="#2563EB" stroke-width="2"/>
+  <rect x="88" y="212" width="12" height="44" rx="6" ry="6" fill="#2563EB"/>
+</svg>

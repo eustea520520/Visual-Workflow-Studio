@@ -15,5 +15,7 @@
     <file alias="run.svg">icons/run.svg</file>
     <file alias="stop.svg">icons/stop.svg</file>
     <file alias="theme.svg">icons/theme.svg</file>
+    <file alias="app-icon.svg">icons/app-icon.svg</file>
+    <file alias="app-icon.ico">icons/app-icon.ico</file>
   </qresource>
 </RCC>

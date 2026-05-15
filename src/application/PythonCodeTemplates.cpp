@@ -1,9 +1,13 @@
-#include "ui/editor/PythonCodeTemplates.h"
+﻿#include "application/PythonCodeTemplates.h"
+
+#include "domain/NodeTypes.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 
-namespace vws::ui {
+namespace vws::application {
+
+namespace NodeTypes = domain::NodeTypes;
 
 namespace {
 
@@ -600,13 +604,13 @@ QString PythonCodeTemplates::defaultAgentCode()
 QString PythonCodeTemplates::defaultCodeForNodeType(const QString& nodeType)
 {
     const auto normalized = nodeType.trimmed().toLower();
-    if (normalized == "starter") {
+    if (normalized == NodeTypes::Starter) {
         return starterDataOutputCode();
     }
-    if (normalized == "agent") {
+    if (normalized == NodeTypes::Agent) {
         return defaultAgentCode();
     }
     return functionDataToDataCode();
 }
 
-} // namespace vws::ui
+} // namespace vws::application

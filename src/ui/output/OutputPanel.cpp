@@ -1,7 +1,7 @@
 #include "ui/output/OutputPanel.h"
 
 #include "domain/RunRecord.h"
-#include "execution/ExecutionEngine.h"
+#include "execution/WorkflowExecutionResult.h"
 #include "ui/editor/PythonCodeEditor.h"
 
 #include <QDateTime>

@@ -1,7 +1,10 @@
-#include "ui/editor/PythonNodeEditorDialog.h"
+﻿#include "ui/editor/PythonNodeEditorDialog.h"
 
 #include "ui/editor/PythonCodeEditor.h"
-#include "ui/editor/PythonCodeTemplates.h"
+#include "application/PythonCodeTemplates.h"
+#include "domain/NodeConfigKeys.h"
+#include "domain/NodeConfigView.h"
+#include "domain/NodeTypes.h"
 
 #include <QCloseEvent>
 #include <QFrame>
@@ -21,6 +24,10 @@
 #include <QVBoxLayout>
 
 namespace vws::ui {
+
+using application::PythonCodeTemplates;
+namespace ConfigKeys = domain::NodeConfigKeys;
+namespace NodeTypes = domain::NodeTypes;
 
 PythonNodeEditorDialog::PythonNodeEditorDialog(
     const QString& nodeName,
@@ -80,7 +87,7 @@ void PythonNodeEditorDialog::closeEvent(QCloseEvent* event)
 
 void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 {
-    const bool isAgent = m_nodeType == "agent";
+    const bool isAgent = m_nodeType == NodeTypes::Agent;
 
     setWindowTitle(tr("Python Node Editor - %1").arg(nodeName));
     setObjectName(QStringLiteral("pythonNodeEditorDialog"));
@@ -132,34 +139,35 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
     layout->addLayout(header);
 
     if (isAgent) {
+        const domain::NodeConfigView config(m_nodeConfig);
         // Create agent-specific widgets inline so the single QFormLayout owns all widths.
         m_agentUrlEdit = new QLineEdit(this);
         m_agentUrlEdit->setPlaceholderText(PythonCodeTemplates::agentUrlPlaceholder());
-        m_agentUrlEdit->setText(m_nodeConfig.value("agent_url").toString());
+        m_agentUrlEdit->setText(config.agentUrl());
 
         m_agentModelEdit = new QLineEdit(this);
         m_agentModelEdit->setPlaceholderText(PythonCodeTemplates::agentModelPlaceholder());
-        m_agentModelEdit->setText(m_nodeConfig.value("agent_model").toString());
+        m_agentModelEdit->setText(config.agentModel());
 
         m_agentApiKeyEdit = new QLineEdit(this);
         m_agentApiKeyEdit->setEchoMode(QLineEdit::Password);
         m_agentApiKeyEdit->setPlaceholderText(PythonCodeTemplates::agentApiKeyPlaceholder());
-        m_agentApiKeyEdit->setText(m_nodeConfig.value("agent_api_key").toString());
+        m_agentApiKeyEdit->setText(config.agentApiKey());
 
         m_agentMaxRetriesEdit = new QLineEdit(this);
         m_agentMaxRetriesEdit->setPlaceholderText(QString::number(PythonCodeTemplates::defaultAgentMaxRetries()));
         m_agentMaxRetriesEdit->setText(QString::number(
-            m_nodeConfig.value("agent_max_retries").toInt(PythonCodeTemplates::defaultAgentMaxRetries())));
+            config.agentMaxRetries(PythonCodeTemplates::defaultAgentMaxRetries())));
         m_agentMaxRetriesEdit->setValidator(new QIntValidator(1, 100, m_agentMaxRetriesEdit));
 
         m_agentBackgroundPromptEdit = new QPlainTextEdit(this);
         m_agentBackgroundPromptEdit->setMinimumHeight(110);
-        m_agentBackgroundPromptEdit->setPlainText(m_nodeConfig.value("agent_background_prompt").toString(
+        m_agentBackgroundPromptEdit->setPlainText(config.agentBackgroundPrompt(
             PythonCodeTemplates::defaultAgentBackgroundPrompt()));
 
         m_agentTaskPromptEdit = new QPlainTextEdit(this);
         m_agentTaskPromptEdit->setMinimumHeight(150);
-        m_agentTaskPromptEdit->setPlainText(m_nodeConfig.value("agent_task_prompt").toString(
+        m_agentTaskPromptEdit->setPlainText(config.agentTaskPrompt(
             PythonCodeTemplates::defaultAgentTaskPrompt()));
 
         m_loadAgentTemplateButton = new QPushButton(tr("Load Agent Template"), this);
@@ -246,7 +254,7 @@ void PythonNodeEditorDialog::buildAgentSettings(QVBoxLayout* layout)
 
 void PythonNodeEditorDialog::loadAgentTemplate()
 {
-    if (m_nodeType != "agent") {
+    if (m_nodeType != NodeTypes::Agent) {
         return;
     }
 
@@ -256,18 +264,18 @@ void PythonNodeEditorDialog::loadAgentTemplate()
 
 QJsonObject PythonNodeEditorDialog::agentConfigPatch() const
 {
-    if (m_nodeType != "agent") {
+    if (m_nodeType != NodeTypes::Agent) {
         return {};
     }
 
     return {
-        {"agent_url", agentUrl()},
-        {"agent_model", agentModel()},
-        {"agent_api_key", agentApiKey()},
-        {"agent_max_retries", agentMaxRetries()},
-        {"agent_background_prompt", agentBackgroundPrompt()},
-        {"agent_task_prompt", agentTaskPrompt()},
-        {"io_template", PythonCodeTemplates::templateKey(agentTransferTemplate())},
+        {ConfigKeys::AgentUrl, agentUrl()},
+        {ConfigKeys::AgentModel, agentModel()},
+        {ConfigKeys::AgentApiKey, agentApiKey()},
+        {ConfigKeys::AgentMaxRetries, agentMaxRetries()},
+        {ConfigKeys::AgentBackgroundPrompt, agentBackgroundPrompt()},
+        {ConfigKeys::AgentTaskPrompt, agentTaskPrompt()},
+        {ConfigKeys::IoTemplate, PythonCodeTemplates::templateKey(agentTransferTemplate())},
     };
 }
 
@@ -299,7 +307,7 @@ QString PythonNodeEditorDialog::agentTaskPrompt() const
 DataTransferTemplate PythonNodeEditorDialog::agentTransferTemplate() const
 {
     return PythonCodeTemplates::transferTemplateFromKey(
-        m_nodeConfig.value("io_template").toString(),
+        domain::NodeConfigView(m_nodeConfig).ioTemplate(),
         DataTransferTemplate::DataToData);
 }
 

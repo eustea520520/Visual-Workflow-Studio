@@ -6,10 +6,9 @@
 
 #include <QAction>
 #include <QHash>
-#include <QJsonObject>
 #include <QMainWindow>
 #include <QPointF>
-#include <QSet>
+#include <QJsonObject>
 
 class QLabel;
 class QPushButton;
@@ -18,6 +17,10 @@ class QWidget;
 namespace vws {
 
 class AppContext;
+
+namespace presentation {
+class AppStore;
+}
 
 namespace ui {
 class CommandBar;
@@ -37,6 +40,8 @@ private:
     void buildLayout();
     void buildCommandBar();
     QWidget* buildCanvasOverlay();
+    void renderCurrentWorkflowOnCanvas();
+    void clearCanvasWorkflowView();
     void updateCanvasOverlay();
     void applyInitialTheme();
     void createWorkspace();
@@ -48,7 +53,8 @@ private:
     void openRunById(const QString& runId);
     void restoreRunRecordToUi(
         const domain::RunRecord& record,
-        const domain::Workflow& workflowSnapshot);
+        const domain::Workflow& workflowSnapshot,
+        const QHash<QString, QJsonObject>& nodeOutputsByNodeId);
     void saveWorkflow();
     void saveSelectedNodeAsTemplate();
     void addNodeFromTemplate();
@@ -59,10 +65,7 @@ private:
     void openPythonNodeEditor(const domain::Node& node);
     void addNodeFromTemplateIdAt(const QString& templateId, const QPointF& scenePos);
     void resetInspectorAndOutput();
-    void rememberRunWorkflow(const QString& runId, const QString& workflowId);
-    void cacheNodeStatus(const QString& workflowId, const QString& nodeId, const QString& status);
     void applyCachedNodeStatusesForWorkflow(const QString& workflowId);
-    void markWorkflowRunning(const QString& workflowId, bool running);
     void refreshWorkspaceExplorer();
     void applyWorkspacePythonExecutable();
     void updatePythonStatus();
@@ -71,8 +74,7 @@ private:
     bool ensureWorkflowOpen();
 
     AppContext& m_appContext;
-    domain::Workspace m_currentWorkspace;
-    domain::Workflow m_currentWorkflow;
+    presentation::AppStore& m_store;
     ui::ThemeManager* m_themeManager = nullptr;
     ui::CommandBar* m_commandBar = nullptr;
     ui::WorkspaceExplorer* m_workspaceExplorer = nullptr;
@@ -96,13 +98,7 @@ private:
     QAction* m_runAction = nullptr;
     QAction* m_cancelRunAction = nullptr;
     QAction* m_toggleThemeAction = nullptr;
-    bool m_workflowRunning = false;
-    QHash<QString, QJsonObject> m_nodeOutputsByNodeId;
-    QString m_selectedNodeId;
-    QHash<QString, QHash<QString, QString>> m_nodeStatusesByWorkflowId;
-    QHash<QString, QString> m_workflowIdByRunId;
-    QSet<QString> m_runningWorkflowIds;
-    QString m_activeRunWorkflowId;
+    bool m_renderingWorkflow = false;
 };
 
 } // namespace vws

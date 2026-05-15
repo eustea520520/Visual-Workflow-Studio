@@ -9,7 +9,6 @@
 #include <QStringList>
 
 namespace vws::execution {
-class ExecutionEngine;
 struct WorkflowExecutionResult;
 }
 
@@ -27,7 +26,7 @@ struct RunListEntry {
 // RunService persists execution summaries under runs/<run_id>/run_record.json.
 class RunService {
 public:
-    explicit RunService(execution::ExecutionEngine& executionEngine);
+    RunService();
 
     QStringList recentRuns(const QString& workspaceRootPath) const;
     QList<RunListEntry> recentRunEntries(const QString& workspaceRootPath) const;
@@ -50,8 +49,6 @@ public:
         QJsonObject& object,
         QString* errorMessage = nullptr) const;
 
-private:
-    execution::ExecutionEngine& m_executionEngine;
 };
 
 } // namespace vws::application

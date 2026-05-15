@@ -1,5 +1,7 @@
 #include "application/WorkflowService.h"
 
+#include "domain/NodeConfigKeys.h"
+#include "domain/NodeConfigView.h"
 #include "infrastructure/FileSystemUtils.h"
 #include "infrastructure/JsonUtils.h"
 
@@ -9,6 +11,8 @@
 #include <QUuid>
 
 namespace vws::application {
+
+namespace ConfigKeys = domain::NodeConfigKeys;
 
 WorkflowService::WorkflowService() = default;
 
@@ -93,9 +97,12 @@ bool WorkflowService::updateNodeDetails(
         node.name = name.trimmed().isEmpty() ? node.name : name.trimmed();
         node.description = description;
         node.runtime.timeoutMs = timeoutMs;
-        node.config.insert("language", node.config.value("language").toString("python"));
-        node.config.insert("entry", node.config.value("entry").toString("run"));
-        node.config.insert("code", code);
+        const domain::NodeConfigView config(node.config);
+        const auto language = config.language();
+        const auto entry = config.entry();
+        node.config.insert(ConfigKeys::Language, language);
+        node.config.insert(ConfigKeys::Entry, entry);
+        node.config.insert(ConfigKeys::Code, code);
         for (auto it = configPatch.constBegin(); it != configPatch.constEnd(); ++it) {
             node.config.insert(it.key(), it.value());
         }
@@ -125,9 +132,12 @@ bool WorkflowService::updateNodeDetails(
 
         node.name = name.trimmed().isEmpty() ? node.name : name.trimmed();
         node.description = description;
-        node.config.insert("language", node.config.value("language").toString("python"));
-        node.config.insert("entry", node.config.value("entry").toString("run"));
-        node.config.insert("code", code);
+        const domain::NodeConfigView config(node.config);
+        const auto language = config.language();
+        const auto entry = config.entry();
+        node.config.insert(ConfigKeys::Language, language);
+        node.config.insert(ConfigKeys::Entry, entry);
+        node.config.insert(ConfigKeys::Code, code);
         for (auto it = configPatch.constBegin(); it != configPatch.constEnd(); ++it) {
             node.config.insert(it.key(), it.value());
         }

@@ -1,5 +1,5 @@
-#include "application/WorkflowService.h"
-#include "ui/editor/PythonCodeTemplates.h"
+﻿#include "application/WorkflowService.h"
+#include "application/PythonCodeTemplates.h"
 #include "ui/editor/PythonCodeEditor.h"
 #include "ui/editor/PythonNodeEditorDialog.h"
 #include "ui/editor/PythonSyntaxHighlighter.h"
@@ -31,7 +31,7 @@ int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
 
-    const auto templateCode = vws::ui::PythonCodeTemplates::defaultFunctionCode();
+    const auto templateCode = vws::application::PythonCodeTemplates::defaultFunctionCode();
     if (const auto check = expect(templateCode.contains("input_data = inputs.get(\"input\", {})"),
             "Default Python template should show how to read the default input port")) {
         return check;
@@ -40,106 +40,106 @@ int main(int argc, char* argv[])
             "Default Python template should return outputs.output for downstream nodes")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::starterEmptyOutputCode().contains("\"output\": {}"),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::starterEmptyOutputCode().contains("\"output\": {}"),
             "Starter empty-output template should return an empty output object")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultStarterCode().contains("output_data"),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::defaultStarterCode().contains("output_data"),
             "Starter data-output template should create business data")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentCode().contains("urllib.request"),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentCode().contains("urllib.request"),
             "Agent template should use the standard-library HTTP client")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentCode().contains("/chat/completions"),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentCode().contains("/chat/completions"),
             "Agent template should call an OpenAI-compatible chat completion endpoint")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::agentCode(
+    if (const auto check = expect(vws::application::PythonCodeTemplates::agentCode(
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
                 3,
                 "background",
                 "task",
-                vws::ui::DataTransferTemplate::FileToFile).contains("\"https://example.test/v1\""),
+                vws::application::DataTransferTemplate::FileToFile).contains("\"https://example.test/v1\""),
             "Agent template should embed structured Agent settings")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::agentCode(
+    if (const auto check = expect(vws::application::PythonCodeTemplates::agentCode(
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
                 3,
                 "background",
                 "task",
-                vws::ui::DataTransferTemplate::FileToFile).contains("input_mode = \"file\"")
-            && vws::ui::PythonCodeTemplates::agentCode(
+                vws::application::DataTransferTemplate::FileToFile).contains("input_mode = \"file\"")
+            && vws::application::PythonCodeTemplates::agentCode(
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
                 3,
                 "background",
                 "task",
-                vws::ui::DataTransferTemplate::FileToFile).contains("output_mode = \"file\""),
+                vws::application::DataTransferTemplate::FileToFile).contains("output_mode = \"file\""),
             "Agent file-to-file template should read a file and write a file artifact")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::agentCode(
+    if (const auto check = expect(vws::application::PythonCodeTemplates::agentCode(
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
                 3,
                 "background",
                 "task",
-                vws::ui::DataTransferTemplate::FileToData).contains("file_text = file.read()")
-            && vws::ui::PythonCodeTemplates::agentCode(
+                vws::application::DataTransferTemplate::FileToData).contains("file_text = file.read()")
+            && vws::application::PythonCodeTemplates::agentCode(
                 "https://example.test/v1",
                 "model-x",
                 "key-x",
                 3,
                 "background",
                 "task",
-                vws::ui::DataTransferTemplate::FileToData).contains("\"content\": file_text"),
+                vws::application::DataTransferTemplate::FileToData).contains("\"content\": file_text"),
             "Agent file-input template should pass the full file content, not a preview")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::starterFileOutputCode().contains("\"artifacts\"")
-            && vws::ui::PythonCodeTemplates::starterFileOutputCode().contains("\"file_path\""),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::starterFileOutputCode().contains("\"artifacts\"")
+            && vws::application::PythonCodeTemplates::starterFileOutputCode().contains("\"file_path\""),
             "File starter template should register artifacts and pass file_path downstream")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::functionFileToFileCode().contains("source_path")
-            && vws::ui::PythonCodeTemplates::functionFileToFileCode().contains("\"artifacts\""),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::functionFileToFileCode().contains("source_path")
+            && vws::application::PythonCodeTemplates::functionFileToFileCode().contains("\"artifacts\""),
             "File function template should read an upstream path and register an artifact")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("file_type = \"\"")
-            && vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("file_name = \"output\"")
-            && !vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::DataToFile).contains("output_path = artifact_dir / \"output.csv\""),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("file_type = \"\"")
+            && vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("file_name = \"output\"")
+            && !vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("output_path = artifact_dir / \"output.csv\""),
             "Data-to-file template should use generic file_name without .csv as default output path")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::FileToData).contains("source_format")
-            && !vws::ui::PythonCodeTemplates::codeForTemplate(vws::ui::DataTransferTemplate::FileToData).contains("\"format\": input_data.get(\"format\", \"csv\")"),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::FileToData).contains("source_format")
+            && !vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::FileToData).contains("\"format\": input_data.get(\"format\", \"csv\")"),
             "File-to-data template should not default to CSV format")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentUrl().isEmpty()
-            && vws::ui::PythonCodeTemplates::defaultAgentModel().isEmpty()
-            && !vws::ui::PythonCodeTemplates::agentUrlPlaceholder().isEmpty()
-            && !vws::ui::PythonCodeTemplates::agentModelPlaceholder().isEmpty(),
+    if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentUrl().isEmpty()
+            && vws::application::PythonCodeTemplates::defaultAgentModel().isEmpty()
+            && !vws::application::PythonCodeTemplates::agentUrlPlaceholder().isEmpty()
+            && !vws::application::PythonCodeTemplates::agentModelPlaceholder().isEmpty(),
             "Agent URL/model defaults should be empty and placeholders non-empty")) {
         return check;
     }
-    if (const auto check = expect(vws::ui::PythonCodeTemplates::defaultAgentMaxRetries() == 3,
+    if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentMaxRetries() == 3,
             "Default agent max retries should be 3")) {
         return check;
     }
-    const auto agentCode = vws::ui::PythonCodeTemplates::agentCode(
+    const auto agentCode = vws::application::PythonCodeTemplates::agentCode(
         "https://example.test/v1", "model-x", "key-x", 3,
-        "background", "task", vws::ui::DataTransferTemplate::DataToData);
+        "background", "task", vws::application::DataTransferTemplate::DataToData);
     if (const auto check = expect(agentCode.contains("max_retries"),
             "Agent template should contain max_retries")) {
         return check;
@@ -180,7 +180,7 @@ int main(int argc, char* argv[])
         "agent",
         {{"io_template", "data_to_data"}},
         "def run(inputs, context):\n    return {\"outputs\": {\"output\": {\"custom\": True}}, \"artifacts\": []}\n",
-        vws::ui::PythonCodeTemplates::defaultAgentCode());
+        vws::application::PythonCodeTemplates::defaultAgentCode());
     auto* agentEditor = agentDialog.findChild<vws::ui::PythonCodeEditor*>();
     if (const auto check = expect(agentEditor != nullptr && !agentEditor->isReadOnly(),
             "Agent Python editor should be editable")) {

@@ -10,7 +10,7 @@ The UI is a Qt Widgets desktop shell:
 
 ## Main Window
 
-`MainWindow` composes widgets and routes user actions to application services. It does not own workflow persistence logic directly. It keeps the current workspace/workflow selection, updates the canvas, refreshes the browser, and bridges execution events into the UI.
+`MainWindow` composes widgets and routes user actions to presentation controllers. It does not own workflow persistence logic directly. Workspace/workflow/run state lives in `AppStore`; controllers update that state and MainWindow renders it into the canvas, browser, inspector, and output panel.
 
 ## Canvas
 
@@ -29,7 +29,7 @@ The UI is a Qt Widgets desktop shell:
 - right-button drag pan;
 - workspace/workflow empty-state overlays.
 
-The canvas updates the in-memory `Workflow`; `WorkflowService` remains responsible for writing JSON files.
+The canvas emits edit snapshots to `WorkflowController`; `WorkflowDocument` owns the current in-memory workflow. Default node data is created by application-layer `NodeFactory`, so the canvas does not own Python template construction rules. `WorkflowSceneController` manages scene item maps and item deletion so raw `QGraphicsItem*` lifetimes are not spread across the canvas event handlers.
 
 ## Node Editing
 
@@ -55,4 +55,4 @@ Function, Starter, and Agent nodes allow editing title, one-line description, an
 - artifacts and text/table previews;
 - thread trace events.
 
-It consumes execution events and final execution results. It does not run workflows.
+It consumes UI-ready run updates from `RunController` and final execution results. It does not run workflows.

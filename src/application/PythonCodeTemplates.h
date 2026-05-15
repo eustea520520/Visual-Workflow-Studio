@@ -1,8 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <QString>
 
-namespace vws::ui {
+namespace vws::application {
 
 enum class DataTransferTemplate {
     EmptyOutput,
@@ -52,4 +52,4 @@ public:
     static QString defaultCodeForNodeType(const QString& nodeType);
 };
 
-} // namespace vws::ui
+} // namespace vws::application
