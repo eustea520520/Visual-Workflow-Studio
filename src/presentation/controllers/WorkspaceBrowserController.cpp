@@ -59,4 +59,28 @@ WorkspaceBrowserSnapshot WorkspaceBrowserController::snapshot() const
     return snapshot;
 }
 
+bool WorkspaceBrowserController::deleteWorkflowAndRuns(const QString& workflowId, int* deletedRunCount, QString* errorMessage)
+{
+    const auto& workspace = m_store.currentWorkspace();
+    if (workspace.rootPath.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("No workspace is open.");
+        }
+        return false;
+    }
+
+    if (m_store.runningWorkflowIds().contains(workflowId)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Cannot delete a workflow while it is running.");
+        }
+        return false;
+    }
+
+    if (!m_runService.deleteRunsForWorkflow(workspace.rootPath, workflowId, deletedRunCount, errorMessage)) {
+        return false;
+    }
+
+    return m_workflowService.deleteWorkflowFromWorkspace(workspace.rootPath, workflowId, errorMessage);
+}
+
 } // namespace vws::presentation

@@ -48,12 +48,24 @@ PythonNodeEditorDialog::PythonNodeEditorDialog(
     m_descriptionEdit->setText(nodeDescription);
     m_timeoutEdit->setText(QString::number(timeoutMs));
     m_editor->setCode(initialCode.trimmed().isEmpty() ? defaultCode : initialCode);
+    if (m_outputFileNameEdit != nullptr) {
+        const auto outputFileName = PythonCodeTemplates::outputFileNameFromCode(m_editor->code());
+        if (outputFileName != PythonCodeTemplates::defaultOutputFileName()) {
+            m_outputFileNameEdit->setText(outputFileName);
+        }
+    }
     m_editor->setReadOnly(false);
     setDirty(false);
 
     connect(m_titleEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_descriptionEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_timeoutEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
+    if (m_outputFileNameEdit != nullptr) {
+        connect(m_outputFileNameEdit, &QLineEdit::textChanged, this, [this]() {
+            m_outputFileNameNeedsRefresh = true;
+            setDirty(true);
+        });
+    }
     connect(m_editor, &QPlainTextEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_editor, &PythonCodeEditor::cursorPositionInfoChanged, this, &PythonNodeEditorDialog::updateCursorStatus);
     connect(m_saveButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::save);
@@ -121,10 +133,21 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
     m_timeoutEdit->setPlaceholderText(tr("300000"));
     m_timeoutEdit->setValidator(new QIntValidator(1, 86400000, m_timeoutEdit));
 
+    if (usesOutputFileName()) {
+        m_outputFileNameEdit = new QLineEdit(this);
+        m_outputFileNameEdit->setObjectName(QStringLiteral("outputFileNameEdit"));
+        m_outputFileNameEdit->setPlaceholderText(PythonCodeTemplates::defaultOutputFileName());
+        m_outputFileNameEdit->setToolTip(tr("Saved into the Python line: output_file_path = ..."));
+    }
+
     auto* metadataForm = new QFormLayout();
+    metadataForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     metadataForm->addRow(tr("Title"), m_titleEdit);
     metadataForm->addRow(tr("Description"), m_descriptionEdit);
     metadataForm->addRow(tr("Timeout (ms)"), m_timeoutEdit);
+    if (m_outputFileNameEdit != nullptr) {
+        metadataForm->addRow(tr("Output file name\n(Python: output_file_path)"), m_outputFileNameEdit);
+    }
 
     m_editor = new PythonCodeEditor(this);
     m_editor->setPlaceholderText(PythonCodeTemplates::defaultFunctionCode());
@@ -172,7 +195,8 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
         m_agentTaskPromptEdit->setPlainText(config.agentTaskPrompt(
             PythonCodeTemplates::defaultAgentTaskPrompt()));
 
-        m_loadAgentTemplateButton = new QPushButton(tr("Load Agent Template"), this);
+        m_loadAgentTemplateButton = new QPushButton(tr("Apply Agent Fields"), this);
+        m_loadAgentTemplateButton->setObjectName(QStringLiteral("applyAgentFieldsButton"));
         m_loadAgentTemplateButton->setProperty("buttonRole", "secondary");
         connect(m_loadAgentTemplateButton, &QPushButton::clicked, this, &PythonNodeEditorDialog::loadAgentTemplate);
 
@@ -194,22 +218,25 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
         leftForm->setContentsMargins(0, 0, 0, 0);
         leftForm->setHorizontalSpacing(10);
         leftForm->setVerticalSpacing(8);
-        leftForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        leftForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         leftForm->addRow(tr("Title"), m_titleEdit);
         leftForm->addRow(tr("Description"), m_descriptionEdit);
         leftForm->addRow(tr("Timeout (ms)"), m_timeoutEdit);
-        leftForm->addRow(tr("URL"), m_agentUrlEdit);
-        leftForm->addRow(tr("Model name"), m_agentModelEdit);
-        leftForm->addRow(tr("API key"), m_agentApiKeyEdit);
-        leftForm->addRow(tr("Max request retries"), m_agentMaxRetriesEdit);
+        if (m_outputFileNameEdit != nullptr) {
+            leftForm->addRow(tr("Output file name\n(Python: output_file_path)"), m_outputFileNameEdit);
+        }
+        leftForm->addRow(tr("URL\n(Python: base_url)"), m_agentUrlEdit);
+        leftForm->addRow(tr("Model name\n(Python: model_name)"), m_agentModelEdit);
+        leftForm->addRow(tr("API key\n(Python: api_key)"), m_agentApiKeyEdit);
+        leftForm->addRow(tr("Max request retries\n(Python: max_retries)"), m_agentMaxRetriesEdit);
         leftLayout->addLayout(leftForm);
 
-        auto* bgLabel = new QLabel(tr("Background prompt"), leftPanel);
+        auto* bgLabel = new QLabel(tr("Background prompt\n(Python: background_prompt)"), leftPanel);
         leftLayout->addSpacing(8);
         leftLayout->addWidget(bgLabel);
         leftLayout->addWidget(m_agentBackgroundPromptEdit);
 
-        auto* taskLabel = new QLabel(tr("Task goal prompt"), leftPanel);
+        auto* taskLabel = new QLabel(tr("Task goal prompt\n(Python: task_prompt)"), leftPanel);
         leftLayout->addSpacing(8);
         leftLayout->addWidget(taskLabel);
         leftLayout->addWidget(m_agentTaskPromptEdit);
@@ -260,7 +287,14 @@ void PythonNodeEditorDialog::loadAgentTemplate()
         return;
     }
 
-    applyAgentTemplateToEditor();
+    QString errorMessage;
+    if (!applyEditorFieldsToCode(&errorMessage, true, usesOutputFileName())) {
+        QMessageBox::warning(
+            this,
+            tr("Python Code Update Failed"),
+            tr("Could not load editor fields into Python code.\n\n%1").arg(errorMessage));
+        return;
+    }
     setDirty(true);
 }
 
@@ -306,11 +340,31 @@ QString PythonNodeEditorDialog::agentTaskPrompt() const
     return m_agentTaskPromptEdit != nullptr ? m_agentTaskPromptEdit->toPlainText() : QString();
 }
 
-DataTransferTemplate PythonNodeEditorDialog::agentTransferTemplate() const
+QString PythonNodeEditorDialog::outputFileName() const
 {
+    return m_outputFileNameEdit != nullptr
+        ? m_outputFileNameEdit->text().trimmed()
+        : PythonCodeTemplates::defaultOutputFileName();
+}
+
+bool PythonNodeEditorDialog::usesOutputFileName() const
+{
+    return PythonCodeTemplates::isFileOutputTemplate(currentTransferTemplate());
+}
+
+DataTransferTemplate PythonNodeEditorDialog::currentTransferTemplate() const
+{
+    const auto fallback = m_nodeType == NodeTypes::Starter
+        ? DataTransferTemplate::DataOutput
+        : DataTransferTemplate::DataToData;
     return PythonCodeTemplates::transferTemplateFromKey(
         domain::NodeConfigView(m_nodeConfig).ioTemplate(),
-        DataTransferTemplate::DataToData);
+        fallback);
+}
+
+DataTransferTemplate PythonNodeEditorDialog::agentTransferTemplate() const
+{
+    return currentTransferTemplate();
 }
 
 int PythonNodeEditorDialog::timeoutMs() const
@@ -424,6 +478,66 @@ bool PythonNodeEditorDialog::validateAgentMaxRetries(QString* errorMessage) cons
     return true;
 }
 
+bool PythonNodeEditorDialog::buildCodeForSave(QString* savedCode, QString* errorMessage) const
+{
+    return buildCodeWithEditorFields(savedCode, errorMessage, false, false);
+}
+
+bool PythonNodeEditorDialog::buildCodeWithEditorFields(
+    QString* savedCode,
+    QString* errorMessage,
+    bool forceAgentFields,
+    bool forceOutputFileName) const
+{
+    if (savedCode == nullptr) {
+        return false;
+    }
+
+    auto updatedCode = m_editor != nullptr ? m_editor->code() : QString();
+    if (m_nodeType == "agent" && (m_agentTemplateNeedsRefresh || forceAgentFields)) {
+        QString agentUpdatedCode;
+        if (!PythonCodeTemplates::tryApplyAgentSettings(
+                updatedCode,
+                agentUrl(),
+                agentModel(),
+                agentApiKey(),
+                agentMaxRetries(),
+                agentBackgroundPrompt(),
+                agentTaskPrompt(),
+                &agentUpdatedCode,
+                errorMessage)) {
+            return false;
+        }
+        updatedCode = agentUpdatedCode;
+    }
+
+    if (usesOutputFileName() && (m_outputFileNameNeedsRefresh || forceOutputFileName)) {
+        QString fileUpdatedCode;
+        if (!PythonCodeTemplates::tryApplyOutputFileName(updatedCode, outputFileName(), &fileUpdatedCode, errorMessage)) {
+            return false;
+        }
+        updatedCode = fileUpdatedCode;
+    }
+
+    *savedCode = updatedCode;
+    return true;
+}
+
+bool PythonNodeEditorDialog::applyEditorFieldsToCode(QString* errorMessage, bool forceAgentFields, bool forceOutputFileName)
+{
+    QString updatedCode;
+    if (!buildCodeWithEditorFields(&updatedCode, errorMessage, forceAgentFields, forceOutputFileName)) {
+        return false;
+    }
+
+    if (m_editor != nullptr && m_editor->code() != updatedCode) {
+        m_editor->setCode(updatedCode);
+    }
+    m_agentTemplateNeedsRefresh = false;
+    m_outputFileNameNeedsRefresh = false;
+    return true;
+}
+
 void PythonNodeEditorDialog::save()
 {
     if (m_saveInProgress) {
@@ -441,18 +555,21 @@ void PythonNodeEditorDialog::save()
         return;
     }
 
-    // Requirement: when Agent settings change, saving should behave like
-    // clicking "Load Agent Template" first, so the generated Python code
-    // always contains the latest Agent settings.
-    if (m_nodeType == "agent" && m_agentTemplateNeedsRefresh) {
-        applyAgentTemplateToEditor();
+    QString savedCode;
+    if (!buildCodeForSave(&savedCode, &errorMessage)) {
+        QMessageBox::warning(
+            this,
+            tr("Python Code Update Failed"),
+            tr("Could not load editor fields into Python code.\n\n%1").arg(errorMessage));
+        return;
     }
 
     m_saveInProgress = true;
     if (m_saveButton != nullptr) {
         m_saveButton->setEnabled(false);
     }
-    emit nodeSaved(nodeName(), nodeDescription(), timeoutMs(), m_editor->code(), agentConfigPatch());
+    applyEditorFieldsToCode(nullptr, false, false);
+    emit nodeSaved(nodeName(), nodeDescription(), timeoutMs(), savedCode, agentConfigPatch());
     setDirty(false);
     m_saveInProgress = false;
 }
@@ -505,24 +622,6 @@ void PythonNodeEditorDialog::markAgentTemplateNeedsRefresh()
 
     m_agentTemplateNeedsRefresh = true;
     setDirty(true);
-}
-
-void PythonNodeEditorDialog::applyAgentTemplateToEditor()
-{
-    if (m_nodeType != "agent" || m_editor == nullptr) {
-        return;
-    }
-
-    m_editor->setCode(PythonCodeTemplates::agentCode(
-        agentUrl(),
-        agentModel(),
-        agentApiKey(),
-        agentMaxRetries(),
-        agentBackgroundPrompt(),
-        agentTaskPrompt(),
-        agentTransferTemplate()));
-
-    m_agentTemplateNeedsRefresh = false;
 }
 
 } // namespace vws::ui

@@ -1,10 +1,14 @@
 #pragma once
 
 #include "domain/Node.h"
+#include "ui/canvas/NodePortSlotViewModel.h"
+#include "ui/canvas/PortSlotHit.h"
 
 #include <QGraphicsObject>
 #include <QPointF>
+#include <QSizeF>
 #include <QString>
+#include <optional>
 
 namespace vws::ui {
 
@@ -35,11 +39,20 @@ public:
     QString nodeId() const;
     domain::Node node() const;
     void setNode(const domain::Node& node);
+    void setPortSlots(const QList<NodePortSlotViewModel>& inputs, const QList<NodePortSlotViewModel>& outputs);
     void setVisualState(NodeVisualState state);
     NodeVisualState visualState() const;
 
     QPointF inputAnchorScenePos() const;
     QPointF outputAnchorScenePos() const;
+    QPointF inputAnchorScenePos(int slotIndex) const;
+    QPointF outputAnchorScenePos(int slotIndex) const;
+    QPointF inputSlotAnchorScenePos(int slotIndex) const;
+    QPointF outputSlotAnchorScenePos(int slotIndex) const;
+    std::optional<PortSlotHit> inputSlotAt(const QPointF& scenePos, qreal hitRadius) const;
+    std::optional<PortSlotHit> outputSlotAt(const QPointF& scenePos, qreal hitRadius) const;
+    int inputSlotCount(const QString& portName = QStringLiteral("input")) const;
+    int outputSlotCount(const QString& portName = QStringLiteral("output")) const;
     QRectF bodySceneRect() const;
 
 signals:
@@ -55,9 +68,21 @@ private:
     QColor borderColor() const;
     QColor fillColor() const;
     QColor stateStripColor() const;
+    QRectF bodyRect() const;
+    QSizeF bodySize() const;
+    QPointF inputAnchorLocalPos() const;
+    QPointF outputAnchorLocalPos() const;
+    QPointF slotAnchorLocalPos(bool inputSide, int slotIndex) const;
+    std::optional<PortSlotHit> slotAt(const QPointF& scenePos, qreal hitRadius, bool inputSide) const;
+    void paintPortSlots(QPainter* painter, bool inputSide) const;
+    static QRectF boundingRectFor(const domain::Node& node);
+    static QSizeF bodySizeForRotation(int rotationDegrees);
+    int maxSlotCount() const;
 
     domain::Node m_node;
     NodeVisualState m_state = NodeVisualState::Idle;
+    QList<NodePortSlotViewModel> m_inputSlots;
+    QList<NodePortSlotViewModel> m_outputSlots;
 };
 
 } // namespace vws::ui

@@ -47,7 +47,9 @@ private:
     void selectPythonInterpreter();
     void createWorkflow();
     void loadWorkflow();
+    void openWorkflowGenerationDialog();
     void openWorkflowById(const QString& workflowId);
+    void deleteWorkflowById(const QString& workflowId, const QString& workflowName);
     void openRunById(const QString& runId);
     void restoreRunRecordToUi(
         const domain::RunRecord& record,
@@ -90,6 +92,7 @@ private:
     QAction* m_saveTemplateAction = nullptr;
     QAction* m_connectNodesAction = nullptr;
     QAction* m_importTemplateAction = nullptr;
+    QAction* m_generateWorkflowByLlmAction = nullptr;
     QAction* m_runAction = nullptr;
     QAction* m_cancelRunAction = nullptr;
     QAction* m_toggleThemeAction = nullptr;

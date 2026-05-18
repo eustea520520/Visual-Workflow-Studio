@@ -1,5 +1,6 @@
 #include "application/NodeFactory.h"
 
+#include "application/io/NodeIoSpecUtils.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
 
@@ -54,6 +55,7 @@ domain::Node NodeFactory::createStarterNode(
         {ConfigKeys::IoTemplate, PythonCodeTemplates::templateKey(codeTemplate)},
         {ConfigKeys::Code, PythonCodeTemplates::codeForTemplate(codeTemplate)},
     };
+    node.ioSpec = NodeIoSpecUtils::defaultSpecForNode(node);
     return node;
 }
 
@@ -77,6 +79,7 @@ domain::Node NodeFactory::createFunctionNode(
         {ConfigKeys::IoTemplate, PythonCodeTemplates::templateKey(templateKind)},
         {ConfigKeys::Code, PythonCodeTemplates::codeForTemplate(templateKind)},
     };
+    node.ioSpec = NodeIoSpecUtils::defaultSpecForNode(node);
     return node;
 }
 
@@ -113,6 +116,7 @@ domain::Node NodeFactory::createAgentNode(
                 PythonCodeTemplates::defaultAgentTaskPrompt(),
                 templateKind)},
     };
+    node.ioSpec = NodeIoSpecUtils::defaultSpecForNode(node);
     return node;
 }
 

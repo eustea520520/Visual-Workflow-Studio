@@ -241,7 +241,7 @@ void ThemeManager::buildColorMaps()
 
         // Overlay
         {"overlay-bg",                  QColor(15, 23, 42, 41)},
-        {"overlay-text",               QColor("#FFFFFF")},
+        {"overlay-text",               QColor("#0F172A")},
         {"overlay-btn-primary-bg",     QColor("#F8FAFC")},
         {"overlay-btn-primary-text",   QColor("#111827")},
         {"overlay-btn-secondary-bg",   QColor("#F8FAFC")},

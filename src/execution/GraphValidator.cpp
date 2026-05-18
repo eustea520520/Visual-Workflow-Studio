@@ -64,6 +64,26 @@ bool containsPort(const QStringList& ports, const QString& port)
     return !port.isEmpty() && ports.contains(port);
 }
 
+int portDimension(const QList<domain::PortDimensionSpec>& specs, const QString& portName)
+{
+    for (const auto& spec : specs) {
+        if (spec.portName == portName) {
+            return qBound(1, spec.dimension, 32);
+        }
+    }
+    return 1;
+}
+
+int inputPortDimension(const domain::Node& node, const QString& portName)
+{
+    return portDimension(node.ioSpec.inputs, portName);
+}
+
+int outputPortDimension(const domain::Node& node, const QString& portName)
+{
+    return portDimension(node.ioSpec.outputs, portName);
+}
+
 } // namespace
 
 void GraphValidationResult::addError(const QString& error)
@@ -134,6 +154,9 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
     // Edges must reference existing nodes and valid source/target ports.
     const auto nodeIndex = buildNodeIndex(workflow);
     QSet<QString> seenEdgeIds;
+    QHash<QString, QStringList> targetSlotWriters;
+    QHash<QString, bool> targetPortHasWholeEdge;
+    QHash<QString, bool> targetPortHasSlotEdge;
 
     for (const auto& edge : workflow.edges) {
         if (edge.edgeId.isEmpty()) {
@@ -150,6 +173,14 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
         } else if (!containsPort(fromNode->outputPorts, edge.fromPort)) {
             result.addError(QString("Edge %1 references invalid output port %2 on node %3")
                 .arg(edge.edgeId, edge.fromPort, edge.fromNode));
+        } else if (edge.fromSlot < -1) {
+            result.addError(QString("Edge %1 from_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.fromSlot >= outputPortDimension(*fromNode, edge.fromPort)) {
+            result.addError(QString("Edge %1 references output slot %2 on node %3, but output port %4 has dimension %5.")
+                .arg(edge.edgeId)
+                .arg(edge.fromSlot)
+                .arg(edge.fromNode, edge.fromPort)
+                .arg(outputPortDimension(*fromNode, edge.fromPort)));
         }
 
         const auto toNode = nodeIndex.value(edge.toNode, nullptr);
@@ -159,6 +190,36 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
         } else if (!containsPort(toNode->inputPorts, edge.toPort)) {
             result.addError(QString("Edge %1 references invalid input port %2 on node %3")
                 .arg(edge.edgeId, edge.toPort, edge.toNode));
+        } else if (edge.toSlot < -1) {
+            result.addError(QString("Edge %1 to_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.toSlot >= inputPortDimension(*toNode, edge.toPort)) {
+            result.addError(QString("Edge %1 references input slot %2 on node %3, but input port %4 has dimension %5.")
+                .arg(edge.edgeId)
+                .arg(edge.toSlot)
+                .arg(edge.toNode, edge.toPort)
+                .arg(inputPortDimension(*toNode, edge.toPort)));
+        }
+
+        const auto targetPortKey = QStringLiteral("%1:%2").arg(edge.toNode, edge.toPort);
+        if (edge.toSlot >= 0) {
+            targetPortHasSlotEdge.insert(targetPortKey, true);
+            const auto targetSlotKey = QStringLiteral("%1:%2:%3").arg(edge.toNode, edge.toPort).arg(edge.toSlot);
+            targetSlotWriters[targetSlotKey].append(edge.edgeId);
+        } else {
+            targetPortHasWholeEdge.insert(targetPortKey, true);
+        }
+    }
+
+    for (auto it = targetSlotWriters.cbegin(); it != targetSlotWriters.cend(); ++it) {
+        if (it.value().size() > 1) {
+            result.addError(QString("Input slot %1 is written by multiple edges: %2.")
+                .arg(it.key(), it.value().join(", ")));
+        }
+    }
+
+    for (auto it = targetPortHasSlotEdge.cbegin(); it != targetPortHasSlotEdge.cend(); ++it) {
+        if (it.value() && targetPortHasWholeEdge.value(it.key())) {
+            result.addError(QString("Input port %1 mixes whole-port and slot-level edges.").arg(it.key()));
         }
     }
 }

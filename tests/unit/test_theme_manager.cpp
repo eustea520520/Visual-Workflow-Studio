@@ -34,6 +34,12 @@ int verifyTheme(vws::ui::ThemeManager& themeManager, vws::ui::AppTheme theme)
             "QSS should not use broad deep QWidget descendant selectors")) {
         return check;
     }
+    if (theme == vws::ui::AppTheme::Light) {
+        if (const auto check = expect(themeManager.color("overlay-text").name() == "#0f172a",
+                "Light canvas overlay title should use dark readable text")) {
+            return check;
+        }
+    }
     return 0;
 }
 

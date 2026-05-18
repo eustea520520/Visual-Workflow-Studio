@@ -8,6 +8,7 @@
     <file alias="workspace-open.svg">icons/workspace-open.svg</file>
     <file alias="python.svg">icons/python.svg</file>
     <file alias="workflow-new.svg">icons/workflow-new.svg</file>
+    <file alias="LLM.svg">icons/LLM.svg</file>
     <file alias="save.svg">icons/save.svg</file>
     <file alias="template-save.svg">icons/template-save.svg</file>
     <file alias="link.svg">icons/link.svg</file>

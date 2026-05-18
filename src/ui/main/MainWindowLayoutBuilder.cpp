@@ -80,6 +80,8 @@ CommandBar* MainWindowLayoutBuilder::buildCommandBar(const MainWindowLayoutActio
         actions.newWorkflow, IconSquareButton::Role::Secondary);
     commandBar->addActionButton(QIcon(":/icons/save.svg"),
         actions.saveWorkflow, IconSquareButton::Role::Secondary);
+    commandBar->addActionButton(QIcon(":/icons/LLM.svg"),
+        actions.generateWorkflowByLlm, IconSquareButton::Role::Secondary);
     commandBar->addSeparator();
     commandBar->addActionButton(QIcon(":/icons/template-save.svg"),
         actions.saveTemplate, IconSquareButton::Role::Secondary);

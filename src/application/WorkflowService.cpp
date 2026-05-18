@@ -1,5 +1,7 @@
 #include "application/WorkflowService.h"
 
+#include "application/io/NodeIoSpecUtils.h"
+#include "application/io/PythonIoDimensionAnalyzer.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeConfigView.h"
 #include "infrastructure/FileSystemUtils.h"
@@ -7,6 +9,8 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonObject>
 #include <QUuid>
 
@@ -106,6 +110,8 @@ bool WorkflowService::updateNodeDetails(
         for (auto it = configPatch.constBegin(); it != configPatch.constEnd(); ++it) {
             node.config.insert(it.key(), it.value());
         }
+        const auto analyzedSpec = PythonIoDimensionAnalyzer().analyze(node);
+        node.ioSpec = NodeIoSpecUtils::merged(NodeIoSpecUtils::defaultSpecForNode(node), analyzedSpec);
         workflow.updatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
         return true;
     }
@@ -141,6 +147,8 @@ bool WorkflowService::updateNodeDetails(
         for (auto it = configPatch.constBegin(); it != configPatch.constEnd(); ++it) {
             node.config.insert(it.key(), it.value());
         }
+        const auto analyzedSpec = PythonIoDimensionAnalyzer().analyze(node);
+        node.ioSpec = NodeIoSpecUtils::merged(NodeIoSpecUtils::defaultSpecForNode(node), analyzedSpec);
         workflow.updatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
         return true;
     }
@@ -167,6 +175,30 @@ bool WorkflowService::saveWorkflowToWorkspace(const QString& workspaceRootPath, 
     }
 
     return saveWorkflow(workflowPath(workspaceRootPath, workflow), workflow, errorMessage);
+}
+
+bool WorkflowService::deleteWorkflowFromWorkspace(const QString& workspaceRootPath, const QString& workflowId, QString* errorMessage) const
+{
+    if (workspaceRootPath.trimmed().isEmpty() || workflowId.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Workspace path or workflow id is empty.");
+        }
+        return false;
+    }
+
+    const auto filePath = QDir(workspaceRootPath).filePath(QString("workflows/%1.json").arg(workflowId));
+    if (!QFileInfo::exists(filePath)) {
+        return true;
+    }
+
+    if (!QFile::remove(filePath)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Could not delete workflow file: %1").arg(filePath);
+        }
+        return false;
+    }
+
+    return true;
 }
 
 bool WorkflowService::loadWorkflowFromWorkspace(const QString& workspaceRootPath, const QString& workflowId, domain::Workflow& workflow, QString* errorMessage) const

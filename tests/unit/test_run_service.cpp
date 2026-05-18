@@ -102,6 +102,37 @@ int main(int argc, char* argv[])
         return check;
     }
 
+    vws::domain::Workflow otherWorkflowSnapshot;
+    otherWorkflowSnapshot.workflowId = "workflow-2";
+    otherWorkflowSnapshot.name = "Other Workflow";
+    otherWorkflowSnapshot.workspaceId = "workspace-1";
+
+    vws::execution::WorkflowExecutionResult otherResult;
+    otherResult.runId = "run-other123";
+    otherResult.success = true;
+    otherResult.status = "Succeeded";
+    otherResult.nodeStatuses.insert("node-b", "Succeeded");
+    if (!runService.saveRunRecord(tempDir.path(), "workspace-1", otherWorkflowSnapshot, otherResult, &errorMessage)) {
+        return fail(QString("Could not save second run record: %1").arg(errorMessage));
+    }
+
+    int deletedRunCount = 0;
+    if (!runService.deleteRunsForWorkflow(tempDir.path(), "workflow-1", &deletedRunCount, &errorMessage)) {
+        return fail(QString("Could not delete runs for workflow: %1").arg(errorMessage));
+    }
+    if (const auto check = expect(deletedRunCount == 1,
+            "deleteRunsForWorkflow should delete only matching workflow runs")) {
+        return check;
+    }
+    if (const auto check = expect(!QFileInfo::exists(QDir(tempDir.path()).filePath("runs/run-abc12345")),
+            "deleteRunsForWorkflow should remove matching run directory")) {
+        return check;
+    }
+    if (const auto check = expect(QFileInfo::exists(QDir(tempDir.path()).filePath("runs/run-other123")),
+            "deleteRunsForWorkflow should keep other workflow run directories")) {
+        return check;
+    }
+
     QTextStream(stdout) << "run service tests passed" << Qt::endl;
     return 0;
 }

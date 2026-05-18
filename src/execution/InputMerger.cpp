@@ -16,6 +16,35 @@ QJsonObject InputMerger::buildInputs(
     for (auto portIt = portGroups.cbegin(); portIt != portGroups.cend(); ++portIt) {
         const auto& toPort = portIt.key();
         const auto& edges = portIt.value();
+        bool hasSlotEdges = false;
+        for (const auto& edge : edges) {
+            if (edge.toSlot >= 0) {
+                hasSlotEdges = true;
+                break;
+            }
+        }
+
+        if (hasSlotEdges) {
+            int maxSlot = 0;
+            for (const auto& edge : edges) {
+                maxSlot = qMax(maxSlot, edge.toSlot);
+            }
+
+            QJsonArray inputArray;
+            for (int index = 0; index <= maxSlot; ++index) {
+                inputArray.append(QJsonValue());
+            }
+
+            for (const auto& edge : edges) {
+                if (edge.toSlot < 0) {
+                    continue;
+                }
+                const auto packet = completedEdgeData.value(edge.edgeId);
+                inputArray.replace(edge.toSlot, packet.value);
+            }
+            inputs.insert(toPort, inputArray);
+            continue;
+        }
 
         if (edges.size() == 1) {
             const auto packet = completedEdgeData.value(edges.first().edgeId);

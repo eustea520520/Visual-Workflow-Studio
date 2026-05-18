@@ -27,11 +27,13 @@ struct WorkflowCanvasContextAction {
         AddAgent,
         ConnectSelected,
         DeleteSelected,
+        RotateSelected,
     };
 
     Type type = Type::None;
     StarterNodeTemplate starterTemplate = StarterNodeTemplate::DataOutput;
     DataTransferNodeTemplate dataTransferTemplate = DataTransferNodeTemplate::DataToData;
+    int rotationDeltaDegrees = 0;
 };
 
 // Builds the canvas context menu and translates QAction selection into a small value object.
@@ -41,7 +43,8 @@ public:
         QWidget* parent,
         const QPoint& globalPos,
         bool canConnectSelected,
-        bool hasSelection);
+        bool hasSelection,
+        bool canRotateSelected);
 };
 
 } // namespace vws::ui

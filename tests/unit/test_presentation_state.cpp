@@ -6,6 +6,7 @@
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
 #include "presentation/controllers/WorkflowController.h"
+#include "presentation/controllers/WorkflowIoController.h"
 #include "presentation/models/WorkflowDisplayModel.h"
 #include "presentation/controllers/WorkspaceController.h"
 #include "presentation/state/AppStore.h"
@@ -26,6 +27,15 @@ int fail(const QString& message)
 int expect(bool condition, const QString& message)
 {
     return condition ? 0 : fail(message);
+}
+
+vws::domain::PortDimensionSpec portSpec(const QString& portName, int dimension, const QStringList& labels = {})
+{
+    vws::domain::PortDimensionSpec spec;
+    spec.portName = portName;
+    spec.dimension = dimension;
+    spec.itemLabels = labels;
+    return spec;
 }
 
 } // namespace
@@ -75,6 +85,7 @@ int main()
         nodeTemplateService,
         runService,
         store);
+    vws::presentation::WorkflowIoController workflowIoController;
 
     QString errorMessage;
     if (const auto check = expect(workspaceController.createWorkspace(workspaceDir.path(), "Presentation Test", &errorMessage),
@@ -220,6 +231,60 @@ int main()
             displayModel.workflowName == workflowForDisplay.name
                 && displayModel.nodeNamesById.value(templateSourceNode.nodeId) == templateSourceNode.name,
             "WorkflowDisplayModelBuilder should expose workflow output-panel labels")) {
+        return check;
+    }
+
+    vws::domain::Workflow ioWorkflow;
+    ioWorkflow.workflowId = "io-workflow";
+    vws::domain::Node sourceNode;
+    sourceNode.nodeId = "source";
+    sourceNode.type = "starter";
+    sourceNode.outputPorts = {"output"};
+    sourceNode.ioSpec.outputs.append(portSpec("output", 3, {"a", "b", "c"}));
+    vws::domain::Node targetNode;
+    targetNode.nodeId = "target";
+    targetNode.type = "function";
+    targetNode.inputPorts = {"input"};
+    targetNode.outputPorts = {"output"};
+    targetNode.ioSpec.inputs.append(portSpec("input", 1, {"only"}));
+    ioWorkflow.nodes = {sourceNode, targetNode};
+    vws::domain::Edge wholePortEdge;
+    wholePortEdge.edgeId = "whole-port-edge";
+    wholePortEdge.fromNode = "source";
+    wholePortEdge.fromPort = "output";
+    wholePortEdge.toNode = "target";
+    wholePortEdge.toPort = "input";
+    wholePortEdge.fromSlot = -1;
+    wholePortEdge.toSlot = -1;
+    ioWorkflow.edges = {wholePortEdge};
+    const auto wholePortSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
+    if (const auto check = expect(wholePortSpecs.value("target").inputs.first().dimension == 1
+            && wholePortSpecs.value("target").inputs.first().itemLabels == QStringList({"only"}),
+            "Whole-port edges should not expand downstream input dimensions or labels")) {
+        return check;
+    }
+
+    ioWorkflow.edges[0].fromSlot = 1;
+    ioWorkflow.edges[0].toSlot = 2;
+    const auto slotSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
+    if (const auto check = expect(slotSpecs.value("target").inputs.first().dimension == 1
+            && slotSpecs.value("target").inputs.first().itemLabels == QStringList({"only"}),
+            "Slot-level edges should not expand downstream dimensions without vws input comments")) {
+        return check;
+    }
+
+    const auto runtimeSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
+    if (const auto check = expect(runtimeSpecs.value("target").inputs.first().dimension == 1
+            && runtimeSpecs.value("source").outputs.first().dimension == 3,
+            "Runtime outputs should not reshape visual IO dimensions")) {
+        return check;
+    }
+
+    ioWorkflow.nodes[1].ioSpec.inputs.first() = portSpec("input", 3, {"left", "middle", "right"});
+    const auto commentedSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
+    if (const auto check = expect(commentedSpecs.value("target").inputs.first().dimension == 3
+            && commentedSpecs.value("target").inputs.first().itemLabels == QStringList({"left", "middle", "right"}),
+            "Only saved/comment-derived IO specs should define multi-slot inputs")) {
         return check;
     }
 

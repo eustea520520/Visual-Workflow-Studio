@@ -10,12 +10,15 @@
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/RunController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
+#include "presentation/controllers/WorkflowGenerationController.h"
+#include "presentation/controllers/WorkflowIoController.h"
 #include "presentation/controllers/WorkflowController.h"
 #include "presentation/controllers/WorkspaceController.h"
 #include "presentation/models/WorkflowDisplayModel.h"
 #include "presentation/state/AppStore.h"
 #include "ui/canvas/WorkflowCanvas.h"
 #include "ui/editor/PythonNodeEditorDialog.h"
+#include "ui/generation/WorkflowGenerationDialog.h"
 #include "ui/inspector/NodeInspector.h"
 #include "ui/main/MainWindowLayoutBuilder.h"
 #include "ui/output/OutputPanel.h"
@@ -27,6 +30,8 @@
 #include "ui/workspace/WorkspaceExplorerViewModel.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QClipboard>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -39,6 +44,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPointer>
 #include <QScopedValueRollback>
 #include <QStatusBar>
 #include <QTimer>
@@ -113,6 +119,7 @@ void MainWindow::buildActions()
     auto* addNodeFromTemplateAction = workflowMenu->addAction(tr("Add Node From Template"));
     m_connectNodesAction = workflowMenu->addAction(tr("Connect Selected Nodes"));
     m_importTemplateAction = workflowMenu->addAction(tr("Import Node Template"));
+    m_generateWorkflowByLlmAction = workflowMenu->addAction(tr("Generate Workflow by LLM"));
     workflowMenu->addSeparator();
     m_runAction = workflowMenu->addAction(tr("Run Workflow"));
     m_cancelRunAction = workflowMenu->addAction(tr("Cancel Run"));
@@ -129,6 +136,7 @@ void MainWindow::buildActions()
     connect(addNodeFromTemplateAction, &QAction::triggered, this, &MainWindow::addNodeFromTemplate);
     connect(m_connectNodesAction, &QAction::triggered, this, &MainWindow::connectSelectedNodes);
     connect(m_importTemplateAction, &QAction::triggered, this, &MainWindow::importNodeTemplate);
+    connect(m_generateWorkflowByLlmAction, &QAction::triggered, this, &MainWindow::openWorkflowGenerationDialog);
     connect(m_runAction, &QAction::triggered, this, &MainWindow::runCurrentWorkflow);
     connect(m_cancelRunAction, &QAction::triggered, this, &MainWindow::cancelCurrentWorkflowRun);
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
@@ -151,6 +159,7 @@ void MainWindow::buildLayout()
         m_saveTemplateAction,
         m_connectNodesAction,
         m_importTemplateAction,
+        m_generateWorkflowByLlmAction,
         m_runAction,
         m_cancelRunAction,
         m_toggleThemeAction,
@@ -187,6 +196,7 @@ void MainWindow::buildLayout()
         m_appContext.workflowController().syncCurrentWorkflowFromView(workflow);
     });
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowActivated, this, &MainWindow::openWorkflowById);
+    connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowDeleteRequested, this, &MainWindow::deleteWorkflowById);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::runActivated, this, &MainWindow::openRunById);
     connect(m_canvasOverlay, &ui::EmptyStateOverlay::createWorkspaceRequested, this, &MainWindow::createWorkspace);
     connect(m_canvasOverlay, &ui::EmptyStateOverlay::openWorkspaceRequested, this, &MainWindow::openWorkspace);
@@ -287,6 +297,8 @@ void MainWindow::renderCurrentWorkflowOnCanvas()
 
     QScopedValueRollback<bool> guard(m_renderingWorkflow, true);
     m_workflowCanvas->setWorkflow(m_store.currentWorkflow());
+    m_workflowCanvas->applyRuntimeIoSpecs(
+        m_appContext.workflowIoController().visualSpecsForWorkflow(m_store.currentWorkflow()));
 }
 
 void MainWindow::clearCanvasWorkflowView()
@@ -470,6 +482,100 @@ void MainWindow::loadWorkflow()
     m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
+void MainWindow::openWorkflowGenerationDialog()
+{
+    if (!ensureWorkspaceOpen()) {
+        return;
+    }
+
+    auto* dialog = new ui::WorkflowGenerationDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose, true);
+    dialog->render({
+        QString(),
+        QString(),
+        m_appContext.workflowGenerationController().presetPrompt(),
+        QString(),
+        QString(),
+        QString(),
+        false,
+    });
+
+    QPointer<ui::WorkflowGenerationDialog> guardedDialog(dialog);
+
+    connect(dialog, &ui::WorkflowGenerationDialog::copyPromptRequested, this,
+        [this, guardedDialog](const QString& requirement) {
+            const auto placeholder = requirement.trimmed().isEmpty()
+                ? QStringLiteral("<Describe the workflow you want here>")
+                : requirement;
+            QApplication::clipboard()->setText(
+                m_appContext.workflowGenerationController().presetPromptForCopy(placeholder));
+            if (!guardedDialog.isNull()) {
+                guardedDialog->setStatusMessage(tr("Prompt copied. You can paste it into another LLM."));
+            }
+        });
+
+    connect(dialog, &ui::WorkflowGenerationDialog::importJsonRequested, this,
+        [this, guardedDialog](const QString& jsonText) {
+            presentation::WorkflowGenerationUiResult result;
+            if (!m_appContext.workflowGenerationController().importGeneratedJson(jsonText, result)) {
+                if (!guardedDialog.isNull()) {
+                    guardedDialog->setStatusMessage(result.errorMessage, true);
+                }
+                return;
+            }
+
+            renderCurrentWorkflowOnCanvas();
+            resetInspectorAndOutput();
+            refreshWorkspaceExplorer();
+            updateCanvasOverlay();
+            if (!guardedDialog.isNull()) {
+                guardedDialog->setGeneratedJson(result.rawJson);
+                guardedDialog->setStatusMessage(tr("Imported workflow: %1").arg(result.workflow.name));
+            }
+            m_outputPanel->appendStdout(tr("Imported generated workflow: %1").arg(result.workflow.name));
+        });
+
+    connect(dialog, &ui::WorkflowGenerationDialog::generateRequested, this,
+        [this, guardedDialog](const infrastructure::LlmProviderSettings& provider, const QString& requirement) {
+            if (guardedDialog.isNull()) {
+                return;
+            }
+            guardedDialog->setLoading(true);
+            guardedDialog->setStatusMessage(tr("Generating workflow..."));
+            m_appContext.workflowGenerationController().generateWorkflow(
+                provider,
+                requirement,
+                guardedDialog,
+                [guardedDialog](const QString& message) {
+                    if (!guardedDialog.isNull()) {
+                        guardedDialog->setStatusMessage(message);
+                    }
+                },
+                [this, guardedDialog](presentation::WorkflowGenerationUiResult result) {
+                    if (guardedDialog.isNull()) {
+                        return;
+                    }
+                    guardedDialog->setLoading(false);
+                    guardedDialog->setGeneratedJson(result.rawJson);
+                    if (!result.success) {
+                        guardedDialog->setStatusMessage(result.errorMessage, true);
+                        return;
+                    }
+
+                    renderCurrentWorkflowOnCanvas();
+                    resetInspectorAndOutput();
+                    refreshWorkspaceExplorer();
+                    updateCanvasOverlay();
+                    guardedDialog->setStatusMessage(tr("Generated workflow: %1").arg(result.workflow.name));
+                    m_outputPanel->appendStdout(tr("Generated workflow by LLM: %1").arg(result.workflow.name));
+                });
+        });
+
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+}
+
 void MainWindow::openWorkflowById(const QString& workflowId)
 {
     if (!ensureWorkspaceOpen() || workflowId.trimmed().isEmpty()) {
@@ -487,6 +593,45 @@ void MainWindow::openWorkflowById(const QString& workflowId)
     applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
     updateCanvasOverlay();
     m_outputPanel->appendStdout(tr("Loaded workflow: %1").arg(m_store.currentWorkflow().name));
+}
+
+void MainWindow::deleteWorkflowById(const QString& workflowId, const QString& workflowName)
+{
+    if (!ensureWorkspaceOpen() || workflowId.trimmed().isEmpty()) {
+        return;
+    }
+
+    const auto displayName = workflowName.trimmed().isEmpty() ? workflowId : workflowName.trimmed();
+    const auto answer = QMessageBox::question(
+        this,
+        tr("Delete Workflow"),
+        tr("Delete workflow \"%1\" and all of its run history?\n\nThis cannot be undone.").arg(displayName),
+        QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    int deletedRunCount = 0;
+    QString errorMessage;
+    if (!m_appContext.workspaceBrowserController().deleteWorkflowAndRuns(
+            workflowId,
+            &deletedRunCount,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Delete Workflow"), errorMessage);
+        return;
+    }
+
+    if (m_store.currentWorkflow().workflowId == workflowId) {
+        clearCanvasWorkflowView();
+        m_store.clearCurrentWorkflow();
+        resetInspectorAndOutput();
+        updateCanvasOverlay();
+    }
+
+    refreshWorkspaceExplorer();
+    m_outputPanel->appendStdout(
+        tr("Deleted workflow: %1; deleted runs: %2").arg(displayName).arg(deletedRunCount));
 }
 
 void MainWindow::openRunById(const QString& runId)

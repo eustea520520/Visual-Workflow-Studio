@@ -21,6 +21,7 @@ struct MainWindowLayoutActions {
     QAction* saveTemplate = nullptr;
     QAction* connectNodes = nullptr;
     QAction* importTemplate = nullptr;
+    QAction* generateWorkflowByLlm = nullptr;
     QAction* runWorkflow = nullptr;
     QAction* cancelRun = nullptr;
     QAction* toggleTheme = nullptr;

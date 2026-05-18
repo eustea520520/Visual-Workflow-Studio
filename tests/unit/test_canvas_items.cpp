@@ -38,6 +38,26 @@ vws::domain::Node makeNode(const QString& id, const QString& name, double x, dou
     return node;
 }
 
+void setIoDimension(vws::domain::Node& node, int inputDimension, int outputDimension)
+{
+    node.ioSpec.inputs.clear();
+    node.ioSpec.outputs.clear();
+    if (!node.inputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec input;
+        input.portName = "input";
+        input.dimension = inputDimension;
+        input.itemLabels = {"1", "2", "3"};
+        node.ioSpec.inputs.append(input);
+    }
+    if (!node.outputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec output;
+        output.portName = "output";
+        output.dimension = outputDimension;
+        output.itemLabels = {"1", "2", "3"};
+        node.ioSpec.outputs.append(output);
+    }
+}
+
 vws::ui::NodeGraphicsItem* findNodeItem(QGraphicsScene* scene, const QString& nodeId)
 {
     for (auto* item : scene->items()) {
@@ -144,6 +164,26 @@ int main(int argc, char* argv[])
     if (const auto check = expect(nodeB != nullptr, "Node B graphics item should exist")) {
         return check;
     }
+
+    auto rotatedNodeA = nodeA->node();
+    rotatedNodeA.rotationDegrees = 90;
+    nodeA->setNode(rotatedNodeA);
+    if (const auto check = expect(nodeA->inputAnchorScenePos().y() < nodeA->bodySceneRect().center().y(),
+            "90-degree node input anchor should move to the top")) {
+        return check;
+    }
+    if (const auto check = expect(nodeA->outputAnchorScenePos().y() > nodeA->bodySceneRect().center().y(),
+            "90-degree node output anchor should move to the bottom")) {
+        return check;
+    }
+    rotatedNodeA.rotationDegrees = 180;
+    nodeA->setNode(rotatedNodeA);
+    if (const auto check = expect(nodeA->inputAnchorScenePos().x() > nodeA->outputAnchorScenePos().x(),
+            "180-degree node should swap input/output horizontal anchors")) {
+        return check;
+    }
+    rotatedNodeA.rotationDegrees = 0;
+    nodeA->setNode(rotatedNodeA);
 
     const auto pressPos = canvas.mapFromScene(nodeA->outputAnchorScenePos());
     const auto releasePos = canvas.mapFromScene(nodeB->inputAnchorScenePos());
@@ -307,6 +347,73 @@ int main(int argc, char* argv[])
     QApplication::sendEvent(&canvas, &undoEvent);
     if (const auto check = expect(canvas.workflow().nodes.size() == countBeforeUndoShortcut,
             "Ctrl+Z on the canvas should undo the previous canvas edit")) {
+        return check;
+    }
+
+    vws::domain::Workflow slotCanvasWorkflow;
+    slotCanvasWorkflow.workflowId = "slot-canvas";
+    slotCanvasWorkflow.workspaceId = "workspace-test";
+    slotCanvasWorkflow.name = "Slot Canvas";
+    auto slotSourceNode = makeNode("slot-a", "Slot A", -160, 0);
+    auto slotTargetNode = makeNode("slot-b", "Slot B", 180, 0);
+    setIoDimension(slotSourceNode, 1, 3);
+    setIoDimension(slotTargetNode, 3, 1);
+    slotCanvasWorkflow.nodes = {slotSourceNode, slotTargetNode};
+    canvas.setWorkflow(slotCanvasWorkflow);
+    auto* slotSource = findNodeItem(canvas.scene(), "slot-a");
+    auto* slotTarget = findNodeItem(canvas.scene(), "slot-b");
+    if (const auto check = expect(slotSource != nullptr && slotTarget != nullptr,
+            "Slot test nodes should exist")) {
+        return check;
+    }
+    if (const auto check = expect(slotSource->outputSlotCount() == 3
+            && slotTarget->inputSlotCount() == 3,
+            "NodeGraphicsItem should expose three slot circles for configured dimensions")) {
+        return check;
+    }
+    if (const auto check = expect(slotSource->outputAnchorScenePos(1) != slotSource->outputAnchorScenePos(0)
+            && slotTarget->inputAnchorScenePos(2) != slotTarget->inputAnchorScenePos(0),
+            "Slot anchors should differ by slot index")) {
+        return check;
+    }
+    const auto outputHit = slotSource->outputSlotAt(slotSource->outputAnchorScenePos(1), 14.0);
+    const auto inputHit = slotTarget->inputSlotAt(slotTarget->inputAnchorScenePos(2), 14.0);
+    if (const auto check = expect(outputHit.has_value() && outputHit->slotIndex == 1
+            && inputHit.has_value() && inputHit->slotIndex == 2,
+            "Slot hit-test should report exact output/input slot index")) {
+        return check;
+    }
+
+    const auto slotPressPos = canvas.mapFromScene(slotSource->outputAnchorScenePos(1));
+    const auto slotReleasePos = canvas.mapFromScene(slotTarget->inputAnchorScenePos(2));
+    QMouseEvent slotPressEvent(
+        QEvent::MouseButtonPress,
+        QPointF(slotPressPos),
+        QPointF(canvas.viewport()->mapToGlobal(slotPressPos)),
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &slotPressEvent);
+    QMouseEvent slotMoveEvent(
+        QEvent::MouseMove,
+        QPointF(slotReleasePos),
+        QPointF(canvas.viewport()->mapToGlobal(slotReleasePos)),
+        Qt::NoButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &slotMoveEvent);
+    QMouseEvent slotReleaseEvent(
+        QEvent::MouseButtonRelease,
+        QPointF(slotReleasePos),
+        QPointF(canvas.viewport()->mapToGlobal(slotReleasePos)),
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &slotReleaseEvent);
+    if (const auto check = expect(canvas.workflow().edges.size() == 1
+            && canvas.workflow().edges.first().fromSlot == 1
+            && canvas.workflow().edges.first().toSlot == 2,
+            "Dragging output[1] to input[2] should create a slot-level edge")) {
         return check;
     }
 

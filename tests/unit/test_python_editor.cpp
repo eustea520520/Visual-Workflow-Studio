@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QFontInfo>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -101,6 +102,14 @@ int main(int argc, char* argv[])
                 3,
                 "background",
                 "task",
+                vws::application::DataTransferTemplate::FileToData).contains("file_input = input_data[0]")
+            && vws::application::PythonCodeTemplates::agentCode(
+                "https://example.test/v1",
+                "model-x",
+                "key-x",
+                3,
+                "background",
+                "task",
                 vws::application::DataTransferTemplate::FileToData).contains("\"content\": file_text"),
             "Agent file-input template should pass the full file content, not a preview")) {
         return check;
@@ -115,15 +124,19 @@ int main(int argc, char* argv[])
             "File function template should read an upstream path and register an artifact")) {
         return check;
     }
-    if (const auto check = expect(vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("file_type = \"\"")
-            && vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("file_name = \"output\"")
-            && !vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("output_path = artifact_dir / \"output.csv\""),
-            "Data-to-file template should use generic file_name without .csv as default output path")) {
+    if (const auto check = expect(vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("output_file_path = \"output.csv\"")
+            && vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::DataToFile).contains("output_path = artifact_dir / output_file_path"),
+            "Data-to-file template should expose an editable output_file_path line")) {
         return check;
     }
     if (const auto check = expect(vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::FileToData).contains("source_format")
             && !vws::application::PythonCodeTemplates::codeForTemplate(vws::application::DataTransferTemplate::FileToData).contains("\"format\": input_data.get(\"format\", \"csv\")"),
             "File-to-data template should not default to CSV format")) {
+        return check;
+    }
+    if (const auto check = expect(vws::application::PythonCodeTemplates::functionFileToDataCode().contains("file_input = input_data[0]")
+            && vws::application::PythonCodeTemplates::functionFileToFileCode().contains("file_input = input_data[0]"),
+            "File-input templates should handle multi-slot input lists by reading slot 0 by default")) {
         return check;
     }
     if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentUrl().isEmpty()
@@ -162,6 +175,73 @@ int main(int argc, char* argv[])
     }
     if (const auto check = expect(agentCode.contains("_post_chat_completion"),
             "Agent template should define _post_chat_completion helper")) {
+        return check;
+    }
+    if (const auto check = expect(templateCode.contains("input_data[0].get(\"field\")"),
+            "Default Python template should explain indexed access for multi-input slots")) {
+        return check;
+    }
+    const auto renamedFileCode = vws::application::PythonCodeTemplates::codeWithOutputFileName(
+        vws::application::PythonCodeTemplates::functionDataToFileCode(),
+        "report.csv");
+    if (const auto check = expect(renamedFileCode.contains("output_file_path = \"report.csv\"")
+            && vws::application::PythonCodeTemplates::outputFileNameFromCode(renamedFileCode) == "report.csv",
+            "File output helper should rewrite and read output_file_path")) {
+        return check;
+    }
+    QString fileUpdateError;
+    QString failedFileCode;
+    if (const auto check = expect(!vws::application::PythonCodeTemplates::tryApplyOutputFileName(
+                "def run(inputs, context):\n    return {}\n",
+                "report.csv",
+                &failedFileCode,
+                &fileUpdateError)
+            && fileUpdateError.contains("output_file_path"),
+            "File output helper should fail explicitly when output_file_path is missing")) {
+        return check;
+    }
+    QString updatedAgentCode;
+    QString agentUpdateError;
+    const auto customAgentCodeWithTemplate = vws::application::PythonCodeTemplates::agentCode(
+        "https://old.test/v1",
+        "old-model",
+        "old-key",
+        3,
+        "old background",
+        "old task",
+        vws::application::DataTransferTemplate::DataToData)
+        + "\n# custom user code marker\n";
+    if (const auto check = expect(vws::application::PythonCodeTemplates::tryApplyAgentSettings(
+                customAgentCodeWithTemplate,
+                "https://new.test/v1",
+                "new-model",
+                "new-key",
+                7,
+                "new background",
+                "new task",
+                &updatedAgentCode,
+                &agentUpdateError)
+            && updatedAgentCode.contains("base_url = \"https://new.test/v1\".strip()")
+            && updatedAgentCode.contains("model_name = \"new-model\".strip()")
+            && updatedAgentCode.contains("max_retries = max(1, int(7))")
+            && updatedAgentCode.contains("background_prompt = \"new background\"")
+            && updatedAgentCode.contains("# custom user code marker"),
+            "Agent setting helper should replace only assignment lines and preserve custom code")) {
+        return check;
+    }
+    QString failedAgentCode;
+    if (const auto check = expect(!vws::application::PythonCodeTemplates::tryApplyAgentSettings(
+                "def run(inputs, context):\n    return {}\n",
+                "https://new.test/v1",
+                "new-model",
+                "new-key",
+                7,
+                "new background",
+                "new task",
+                &failedAgentCode,
+                &agentUpdateError)
+            && agentUpdateError.contains("base_url"),
+            "Agent setting helper should fail explicitly when assignment lines are missing")) {
         return check;
     }
 
@@ -203,6 +283,44 @@ int main(int argc, char* argv[])
     saveButton->click();
     if (const auto check = expect(savedAgentCode == customAgentCode,
             "Saving an Agent node should preserve manually edited Python code")) {
+        return check;
+    }
+
+    vws::ui::PythonNodeEditorDialog fileDialog(
+        "File",
+        "Writes a file",
+        300000,
+        "function",
+        {{"io_template", "data_to_file"}},
+        vws::application::PythonCodeTemplates::functionDataToFileCode(),
+        vws::application::PythonCodeTemplates::functionDataToFileCode());
+    auto* fileNameEdit = fileDialog.findChild<QLineEdit*>("outputFileNameEdit");
+    if (const auto check = expect(fileNameEdit != nullptr,
+            "File-output editor should expose the output file name field")) {
+        return check;
+    }
+    if (const auto check = expect(fileNameEdit->text().isEmpty()
+            && fileNameEdit->placeholderText() == vws::application::PythonCodeTemplates::defaultOutputFileName(),
+            "Default output file name should be a placeholder, not pre-filled text")) {
+        return check;
+    }
+    QString savedFileCode;
+    QObject::connect(
+        &fileDialog,
+        &vws::ui::PythonNodeEditorDialog::nodeSaved,
+        &fileDialog,
+        [&savedFileCode](const QString&, const QString&, int, const QString& code, const QJsonObject&) {
+            savedFileCode = code;
+    });
+    fileNameEdit->setText("custom.csv");
+    auto* fileSaveButton = fileDialog.findChild<QPushButton*>("saveNodeButton");
+    if (const auto check = expect(fileSaveButton != nullptr,
+            "File-output editor should expose the Save button")) {
+        return check;
+    }
+    fileSaveButton->click();
+    if (const auto check = expect(savedFileCode.contains("output_file_path = \"custom.csv\""),
+            "Saving a file-output node should write the selected file name into Python code")) {
         return check;
     }
 

@@ -54,12 +54,17 @@ private:
     QString agentApiKey() const;
     QString agentBackgroundPrompt() const;
     QString agentTaskPrompt() const;
+    QString outputFileName() const;
     int agentMaxRetries() const;
     bool validateAgentMaxRetries(QString* errorMessage = nullptr) const;
+    bool usesOutputFileName() const;
+    DataTransferTemplate currentTransferTemplate() const;
     DataTransferTemplate agentTransferTemplate() const;
+    bool buildCodeForSave(QString* savedCode, QString* errorMessage) const;
+    bool buildCodeWithEditorFields(QString* savedCode, QString* errorMessage, bool forceAgentFields, bool forceOutputFileName) const;
+    bool applyEditorFieldsToCode(QString* errorMessage, bool forceAgentFields, bool forceOutputFileName);
     void save();
     void markAgentTemplateNeedsRefresh();
-    void applyAgentTemplateToEditor();
     bool confirmCloseIfDirty();
     void setDirty(bool dirty);
     void updateCursorStatus(int line, int column);
@@ -68,6 +73,7 @@ private:
     QLineEdit* m_titleEdit = nullptr;
     QLineEdit* m_descriptionEdit = nullptr;
     QLineEdit* m_timeoutEdit = nullptr;
+    QLineEdit* m_outputFileNameEdit = nullptr;
     QLineEdit* m_agentUrlEdit = nullptr;
     QLineEdit* m_agentModelEdit = nullptr;
     QLineEdit* m_agentApiKeyEdit = nullptr;
@@ -83,6 +89,7 @@ private:
     bool m_dirty = false;
     bool m_saveInProgress = false;
     bool m_agentTemplateNeedsRefresh = false;
+    bool m_outputFileNameNeedsRefresh = false;
 };
 
 } // namespace vws::ui

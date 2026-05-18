@@ -9,6 +9,17 @@ namespace {
 
 // 端口目前用 QStringList 表示，序列化时转换成 JSON 数组。
 // 后续如果端口需要类型、显示名、是否必填，可以再升级成 Port 结构体。
+int normalizeRotation(int degrees)
+{
+    int normalized = degrees % 360;
+    if (normalized < 0) {
+        normalized += 360;
+    }
+
+    const int step = ((normalized + 45) / 90) * 90;
+    return step % 360;
+}
+
 QJsonArray stringListToJson(const QStringList& values)
 {
     QJsonArray array;
@@ -74,8 +85,10 @@ QJsonObject Node::toJson() const
     object.insert("name", name);
     object.insert("description", description);
     object.insert("position", position.toJson());
+    object.insert("rotation_degrees", normalizeRotation(rotationDegrees));
     object.insert("input_ports", stringListToJson(inputPorts));
     object.insert("output_ports", stringListToJson(outputPorts));
+    object.insert("io_spec", ioSpec.toJson());
     object.insert("config", config);
     object.insert("runtime", runtime.toJson());
     return object;
@@ -90,8 +103,10 @@ Node Node::fromJson(const QJsonObject& object)
     node.name = object.value("name").toString();
     node.description = object.value("description").toString();
     node.position = NodePosition::fromJson(object.value("position").toObject());
+    node.rotationDegrees = normalizeRotation(object.value("rotation_degrees").toInt(0));
     node.inputPorts = stringListFromJson(object.value("input_ports").toArray());
     node.outputPorts = stringListFromJson(object.value("output_ports").toArray());
+    node.ioSpec = NodeIoSpec::fromJson(object.value("io_spec").toObject());
     node.config = object.value("config").toObject();
     node.runtime = NodeRuntime::fromJson(object.value("runtime").toObject());
     return node;

@@ -5,6 +5,35 @@
 
 namespace vws::application {
 
+namespace {
+
+const domain::Node* findNode(const domain::Workflow& workflow, const QString& nodeId)
+{
+    for (const auto& node : workflow.nodes) {
+        if (node.nodeId == nodeId) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+bool containsPort(const QStringList& ports, const QString& port)
+{
+    return !port.trimmed().isEmpty() && ports.contains(port);
+}
+
+int normalizeRotation(int degrees)
+{
+    int normalized = degrees % 360;
+    if (normalized < 0) {
+        normalized += 360;
+    }
+
+    const int step = ((normalized + 45) / 90) * 90;
+    return step % 360;
+}
+} // namespace
+
 domain::Node WorkflowEditService::addNode(domain::Workflow& workflow, domain::Node node)
 {
     if (node.nodeId.trimmed().isEmpty()) {
@@ -25,6 +54,17 @@ bool WorkflowEditService::updateNode(domain::Workflow& workflow, const domain::N
     return false;
 }
 
+bool WorkflowEditService::rotateNode(domain::Workflow& workflow, const QString& nodeId, int deltaDegrees)
+{
+    for (auto& workflowNode : workflow.nodes) {
+        if (workflowNode.nodeId == nodeId) {
+            workflowNode.rotationDegrees = normalizeRotation(workflowNode.rotationDegrees + deltaDegrees);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool WorkflowEditService::connectNodes(
     domain::Workflow& workflow,
     const domain::Node& sourceNode,
@@ -37,12 +77,47 @@ bool WorkflowEditService::connectNodes(
         return false;
     }
 
+    return connectNodes(
+        workflow,
+        domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), -1},
+        domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), -1},
+        createdEdge);
+}
+
+bool WorkflowEditService::connectNodes(
+    domain::Workflow& workflow,
+    const domain::EdgeEndpoint& source,
+    const domain::EdgeEndpoint& target,
+    domain::Edge& createdEdge)
+{
+    if (source.nodeId == target.nodeId
+        || source.nodeId.trimmed().isEmpty()
+        || target.nodeId.trimmed().isEmpty()
+        || source.portName.trimmed().isEmpty()
+        || target.portName.trimmed().isEmpty()
+        || source.slotIndex < -1
+        || target.slotIndex < -1) {
+        return false;
+    }
+
+    const auto* sourceNode = findNode(workflow, source.nodeId);
+    const auto* targetNode = findNode(workflow, target.nodeId);
+    if (sourceNode == nullptr || targetNode == nullptr) {
+        return false;
+    }
+    if (!containsPort(sourceNode->outputPorts, source.portName)
+        || !containsPort(targetNode->inputPorts, target.portName)) {
+        return false;
+    }
+
     domain::Edge edge;
     edge.edgeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    edge.fromNode = sourceNode.nodeId;
-    edge.fromPort = sourceNode.outputPorts.first();
-    edge.toNode = targetNode.nodeId;
-    edge.toPort = targetNode.inputPorts.first();
+    edge.fromNode = source.nodeId;
+    edge.fromPort = source.portName;
+    edge.fromSlot = source.slotIndex;
+    edge.toNode = target.nodeId;
+    edge.toPort = target.portName;
+    edge.toSlot = target.slotIndex;
 
     workflow.edges.append(edge);
     createdEdge = edge;

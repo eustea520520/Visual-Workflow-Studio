@@ -9,7 +9,8 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
     QWidget* parent,
     const QPoint& globalPos,
     bool canConnectSelected,
-    bool hasSelection)
+    bool hasSelection,
+    bool canRotateSelected)
 {
     QMenu menu(parent);
     auto* starterMenu = menu.addMenu(QObject::tr("Add Starter Node"));
@@ -35,6 +36,13 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
 
     auto* deleteAction = menu.addAction(QObject::tr("Delete Selected"));
     deleteAction->setEnabled(hasSelection);
+
+    auto* rotateMenu = menu.addMenu(QObject::tr("Rotate"));
+    auto* rotateClockwise90Action = rotateMenu->addAction(QObject::tr("Clockwise 90°"));
+    auto* rotateClockwise180Action = rotateMenu->addAction(QObject::tr("Clockwise 180°"));
+    auto* rotateCounterclockwise90Action = rotateMenu->addAction(QObject::tr("Counterclockwise 90°"));
+    auto* rotateCounterclockwise180Action = rotateMenu->addAction(QObject::tr("Counterclockwise 180°"));
+    rotateMenu->setEnabled(canRotateSelected);
 
     const auto* selectedAction = menu.exec(globalPos);
     WorkflowCanvasContextAction action;
@@ -79,6 +87,18 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
         action.type = WorkflowCanvasContextAction::Type::ConnectSelected;
     } else if (selectedAction == deleteAction) {
         action.type = WorkflowCanvasContextAction::Type::DeleteSelected;
+    } else if (selectedAction == rotateClockwise90Action) {
+        action.type = WorkflowCanvasContextAction::Type::RotateSelected;
+        action.rotationDeltaDegrees = 90;
+    } else if (selectedAction == rotateClockwise180Action) {
+        action.type = WorkflowCanvasContextAction::Type::RotateSelected;
+        action.rotationDeltaDegrees = 180;
+    } else if (selectedAction == rotateCounterclockwise90Action) {
+        action.type = WorkflowCanvasContextAction::Type::RotateSelected;
+        action.rotationDeltaDegrees = -90;
+    } else if (selectedAction == rotateCounterclockwise180Action) {
+        action.type = WorkflowCanvasContextAction::Type::RotateSelected;
+        action.rotationDeltaDegrees = -180;
     }
 
     return action;

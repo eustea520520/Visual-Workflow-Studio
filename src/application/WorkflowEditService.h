@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/EdgeEndpoint.h"
 #include "domain/Workflow.h"
 
 #include <QSet>
@@ -13,10 +14,16 @@ class WorkflowEditService final {
 public:
     static domain::Node addNode(domain::Workflow& workflow, domain::Node node);
     static bool updateNode(domain::Workflow& workflow, const domain::Node& node);
+    static bool rotateNode(domain::Workflow& workflow, const QString& nodeId, int deltaDegrees);
     static bool connectNodes(
         domain::Workflow& workflow,
         const domain::Node& sourceNode,
         const domain::Node& targetNode,
+        domain::Edge& createdEdge);
+    static bool connectNodes(
+        domain::Workflow& workflow,
+        const domain::EdgeEndpoint& source,
+        const domain::EdgeEndpoint& target,
         domain::Edge& createdEdge);
     static void removeEdges(domain::Workflow& workflow, const QSet<QString>& edgeIds);
     static void removeNodes(domain::Workflow& workflow, const QSet<QString>& nodeIds);

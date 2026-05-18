@@ -177,6 +177,17 @@ void WorkflowSceneController::setNodeStatus(const QString& nodeId, NodeVisualSta
     }
 }
 
+void WorkflowSceneController::setNodePortSlots(
+    const QString& nodeId,
+    const QList<NodePortSlotViewModel>& inputSlots,
+    const QList<NodePortSlotViewModel>& outputSlots)
+{
+    auto* item = nodeItem(nodeId);
+    if (item != nullptr) {
+        item->setPortSlots(inputSlots, outputSlots);
+    }
+}
+
 void WorkflowSceneController::refreshItems()
 {
     if (m_scene == nullptr) {
@@ -199,6 +210,38 @@ NodeGraphicsItem* WorkflowSceneController::outputNodeAt(const QPointF& scenePos,
         }
     }
     return nullptr;
+}
+
+std::optional<PortSlotHit> WorkflowSceneController::outputSlotAt(const QPointF& scenePos, qreal hitRadius) const
+{
+    for (auto* nodeItem : m_nodeItems) {
+        if (nodeItem == nullptr) {
+            continue;
+        }
+        if (auto hit = nodeItem->outputSlotAt(scenePos, hitRadius); hit.has_value()) {
+            return hit;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<PortSlotHit> WorkflowSceneController::inputSlotAt(
+    const QPointF& scenePos,
+    qreal hitRadius,
+    const QString& excludedNodeId) const
+{
+    for (auto* nodeItem : m_nodeItems) {
+        if (nodeItem == nullptr) {
+            continue;
+        }
+        if (!excludedNodeId.isEmpty() && nodeItem->nodeId() == excludedNodeId) {
+            continue;
+        }
+        if (auto hit = nodeItem->inputSlotAt(scenePos, hitRadius); hit.has_value()) {
+            return hit;
+        }
+    }
+    return std::nullopt;
 }
 
 NodeGraphicsItem* WorkflowSceneController::inputNodeAt(const QPointF& scenePos, qreal hitRadius, const QString& excludedNodeId) const

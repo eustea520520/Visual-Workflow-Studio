@@ -2,6 +2,7 @@
 
 #include "application/WorkflowEditService.h"
 #include "ui/canvas/EdgeGraphicsItem.h"
+#include "ui/canvas/NodePortSlotViewModelBuilder.h"
 #include "ui/canvas/WorkflowCanvasContextMenu.h"
 #include "ui/canvas/WorkflowSceneController.h"
 #include "ui/theme/ThemeManager.h"
@@ -134,13 +135,28 @@ bool WorkflowCanvas::createEdgeBetween(const QString& sourceNodeId, const QStrin
         return false;
     }
 
+    return createEdgeBetween(
+        domain::EdgeEndpoint{sourceNodeId, sourceItem->node().outputPorts.first(), -1},
+        domain::EdgeEndpoint{targetNodeId, targetItem->node().inputPorts.first(), -1});
+}
+
+bool WorkflowCanvas::createEdgeBetween(const domain::EdgeEndpoint& source, const domain::EdgeEndpoint& target)
+{
+    if (source.nodeId == target.nodeId
+        || source.nodeId.trimmed().isEmpty()
+        || target.nodeId.trimmed().isEmpty()
+        || source.portName.trimmed().isEmpty()
+        || target.portName.trimmed().isEmpty()) {
+        return false;
+    }
+
     pushUndoState();
 
     domain::Edge edge;
     if (!application::WorkflowEditService::connectNodes(
             m_workflow,
-            sourceItem->node(),
-            targetItem->node(),
+            source,
+            target,
             edge)) {
         return false;
     }
@@ -177,8 +193,33 @@ bool WorkflowCanvas::updateNode(const domain::Node& node)
     // 这里显式屏蔽 scene 信号，避免 Qt 在图元刷新过程中同步分发 selectionChanged。
     const QSignalBlocker sceneBlocker(m_scene);
     item->setNode(node);
+    setNodeIoSpec(node.nodeId, node.ioSpec);
     updateAllEdgeRoutes();
     return true;
+}
+
+void WorkflowCanvas::setNodeIoSpec(const QString& nodeId, const domain::NodeIoSpec& spec)
+{
+    if (m_sceneController == nullptr) {
+        return;
+    }
+
+    for (auto& node : m_workflow.nodes) {
+        if (node.nodeId != nodeId) {
+            continue;
+        }
+        const auto portSlots = NodePortSlotViewModelBuilder().build(node, spec);
+        m_sceneController->setNodePortSlots(nodeId, portSlots.inputs, portSlots.outputs);
+        updateAllEdgeRoutes();
+        return;
+    }
+}
+
+void WorkflowCanvas::applyRuntimeIoSpecs(const QHash<QString, domain::NodeIoSpec>& specsByNodeId)
+{
+    for (auto it = specsByNodeId.constBegin(); it != specsByNodeId.constEnd(); ++it) {
+        setNodeIoSpec(it.key(), it.value());
+    }
 }
 
 void WorkflowCanvas::setNodeStatus(const QString& nodeId, const QString& status)
@@ -193,11 +234,13 @@ void WorkflowCanvas::setNodeStatus(const QString& nodeId, const QString& status)
 void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
     const auto scenePos = mapToScene(event->pos());
+    const auto selectedNodes = selectedNodeItems();
     const auto action = WorkflowCanvasContextMenu::exec(
         this,
         event->globalPos(),
         m_scene->selectedItems().size() == 2,
-        !m_scene->selectedItems().isEmpty());
+        !m_scene->selectedItems().isEmpty(),
+        selectedNodes.size() == 1 && m_scene->selectedItems().size() == 1);
 
     switch (action.type) {
     case WorkflowCanvasContextAction::Type::AddStarter:
@@ -214,6 +257,9 @@ void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
         return;
     case WorkflowCanvasContextAction::Type::DeleteSelected:
         deleteSelectedItems();
+        return;
+    case WorkflowCanvasContextAction::Type::RotateSelected:
+        rotateSelectedNode(action.rotationDeltaDegrees);
         return;
     case WorkflowCanvasContextAction::Type::None:
         return;
@@ -271,10 +317,16 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
 
     if (event->button() == Qt::LeftButton) {
         const auto scenePos = mapToScene(event->pos());
-        if (auto* sourceNode = outputNodeAt(scenePos)) {
+        if (auto sourceHit = outputSlotAt(scenePos); sourceHit.has_value()) {
             // 从输出端口按下时进入“拖线”模式。
             // 此时不把事件继续交给节点图元，避免节点被拖动。
-            m_edgeDragController.begin(m_scene, sourceNode, scenePos);
+            const auto* sourceNode = m_sceneController != nullptr
+                ? m_sceneController->nodeItem(sourceHit->nodeId)
+                : nullptr;
+            const auto startPos = sourceNode != nullptr
+                ? sourceNode->outputAnchorScenePos(sourceHit->slotIndex)
+                : scenePos;
+            m_edgeDragController.begin(m_scene, sourceHit->toEndpoint(), startPos);
             event->accept();
             return;
         }
@@ -312,9 +364,9 @@ void WorkflowCanvas::mouseReleaseEvent(QMouseEvent* event)
 
     if (m_edgeDragController.isDragging()) {
         const auto scenePos = mapToScene(event->pos());
-        const auto sourceNodeId = m_edgeDragController.sourceNodeId();
-        if (auto* targetNode = inputNodeAt(scenePos, sourceNodeId)) {
-            createEdgeBetween(sourceNodeId, targetNode->nodeId());
+        const auto source = m_edgeDragController.sourceEndpoint();
+        if (auto targetHit = inputSlotAt(scenePos, source.nodeId); targetHit.has_value()) {
+            createEdgeBetween(source, targetHit->toEndpoint());
         }
 
         m_edgeDragController.clear(m_scene);
@@ -375,6 +427,8 @@ void WorkflowCanvas::addNodeItem(const domain::Node& node)
 {
     if (m_sceneController != nullptr) {
         m_sceneController->addNodeItem(node);
+        const auto portSlots = NodePortSlotViewModelBuilder().build(node, node.ioSpec);
+        m_sceneController->setNodePortSlots(node.nodeId, portSlots.inputs, portSlots.outputs);
     }
 }
 
@@ -459,6 +513,40 @@ void WorkflowCanvas::removeNode(const QString& nodeId)
     updateAllEdgeRoutes();
 }
 
+bool WorkflowCanvas::rotateSelectedNode(int deltaDegrees)
+{
+    const auto selectedNodes = selectedNodeItems();
+    if (selectedNodes.size() != 1) {
+        return false;
+    }
+    return rotateNode(selectedNodes.first()->nodeId(), deltaDegrees);
+}
+
+bool WorkflowCanvas::rotateNode(const QString& nodeId, int deltaDegrees)
+{
+    auto* item = m_sceneController != nullptr ? m_sceneController->nodeItem(nodeId) : nullptr;
+    if (item == nullptr) {
+        return false;
+    }
+
+    pushUndoState();
+    if (!application::WorkflowEditService::rotateNode(m_workflow, nodeId, deltaDegrees)) {
+        return false;
+    }
+
+    for (const auto& node : m_workflow.nodes) {
+        if (node.nodeId == nodeId) {
+            item->setNode(node);
+            item->setSelected(true);
+            updateAllEdgeRoutes();
+            emit workflowChanged(workflow());
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void WorkflowCanvas::syncWorkflowFromItems()
 {
     if (m_sceneController != nullptr) {
@@ -498,6 +586,20 @@ NodeGraphicsItem* WorkflowCanvas::inputNodeAt(const QPointF& scenePos, const QSt
     return m_sceneController != nullptr
         ? m_sceneController->inputNodeAt(scenePos, PortHitRadius, excludedNodeId)
         : nullptr;
+}
+
+std::optional<PortSlotHit> WorkflowCanvas::outputSlotAt(const QPointF& scenePos) const
+{
+    return m_sceneController != nullptr
+        ? m_sceneController->outputSlotAt(scenePos, PortHitRadius)
+        : std::nullopt;
+}
+
+std::optional<PortSlotHit> WorkflowCanvas::inputSlotAt(const QPointF& scenePos, const QString& excludedNodeId) const
+{
+    return m_sceneController != nullptr
+        ? m_sceneController->inputSlotAt(scenePos, PortHitRadius, excludedNodeId)
+        : std::nullopt;
 }
 
 NodeVisualState WorkflowCanvas::visualStateFromStatus(const QString& status) const

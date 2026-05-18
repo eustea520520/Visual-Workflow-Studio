@@ -1,7 +1,6 @@
 #include "ui/canvas/EdgeDragController.h"
 
 #include "ui/canvas/CanvasZ.h"
-#include "ui/canvas/NodeGraphicsItem.h"
 #include "ui/theme/ThemeManager.h"
 
 #include <QGraphicsPathItem>
@@ -15,34 +14,40 @@ EdgeDragController::~EdgeDragController()
     clear(nullptr);
 }
 
-bool EdgeDragController::begin(QGraphicsScene* scene, NodeGraphicsItem* sourceNode, const QPointF& scenePos)
+bool EdgeDragController::begin(QGraphicsScene* scene, const domain::EdgeEndpoint& source, const QPointF& startScenePos)
 {
-    if (scene == nullptr || sourceNode == nullptr) {
+    if (scene == nullptr || source.nodeId.trimmed().isEmpty() || source.portName.trimmed().isEmpty()) {
         return false;
     }
 
     clear(scene);
-    m_sourceNode = sourceNode;
-    m_startScenePos = sourceNode->outputAnchorScenePos();
+    m_source = source;
+    m_dragging = true;
+    m_startScenePos = startScenePos;
     m_previewItem = createPreviewItem();
-    m_previewItem->setPath(previewPath(m_startScenePos, scenePos));
+    m_previewItem->setPath(previewPath(m_startScenePos, startScenePos));
     scene->addItem(m_previewItem);
     return true;
 }
 
 bool EdgeDragController::isDragging() const
 {
-    return m_sourceNode != nullptr;
+    return m_dragging;
 }
 
 QString EdgeDragController::sourceNodeId() const
 {
-    return m_sourceNode != nullptr ? m_sourceNode->nodeId() : QString();
+    return m_source.nodeId;
+}
+
+domain::EdgeEndpoint EdgeDragController::sourceEndpoint() const
+{
+    return m_source;
 }
 
 bool EdgeDragController::sourceIs(const QString& nodeId) const
 {
-    return m_sourceNode != nullptr && m_sourceNode->nodeId() == nodeId;
+    return m_dragging && m_source.nodeId == nodeId;
 }
 
 void EdgeDragController::update(const QPointF& scenePos)
@@ -56,7 +61,8 @@ void EdgeDragController::update(const QPointF& scenePos)
 
 void EdgeDragController::clear(QGraphicsScene* scene)
 {
-    m_sourceNode = nullptr;
+    m_source = {};
+    m_dragging = false;
     if (m_previewItem == nullptr) {
         return;
     }

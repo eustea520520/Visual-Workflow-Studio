@@ -4,6 +4,9 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QList>
+#include <QPair>
+#include <QRegularExpression>
 
 namespace vws::application {
 
@@ -31,6 +34,63 @@ QString agentOutputMode(DataTransferTemplate transferTemplate)
     return transferTemplate == DataTransferTemplate::DataToFile || transferTemplate == DataTransferTemplate::FileToFile
         ? QStringLiteral("file")
         : QStringLiteral("data");
+}
+
+QString ioSpecCommentForTemplate(DataTransferTemplate transferTemplate)
+{
+    switch (transferTemplate) {
+    case DataTransferTemplate::EmptyOutput:
+    case DataTransferTemplate::DataOutput:
+    case DataTransferTemplate::FileOutput:
+        return QStringLiteral(
+            "# VWS port circles:\n"
+            "# - Starter nodes have no input port.\n"
+            "# - Only these # vws:output comments define output circle count; runtime data never changes it.\n"
+            "# - If the comment is removed, the node uses one default output circle.\n"
+            "# - Change dimension=N and provide N comma-separated labels to create multiple output circles.\n"
+            "# - For multi-output, return outputs[\"output\"] as a list; slot 0 sends output[0], slot 1 sends output[1].\n"
+            "# vws:output output dimension=1 labels=1\n");
+    case DataTransferTemplate::DataToData:
+    case DataTransferTemplate::DataToFile:
+    case DataTransferTemplate::FileToData:
+    case DataTransferTemplate::FileToFile:
+        return QStringLiteral(
+            "# VWS port circles:\n"
+            "# - Only these # vws:input/output comments define circle count; runtime data never changes it.\n"
+            "# - If the comments are removed, the node uses one default input circle and one default output circle.\n"
+            "# - Change dimension=N and provide N comma-separated labels to create multiple circles.\n"
+            "# - The logical port names stay \"input\" and \"output\"; circle slots are list indexes inside those ports.\n"
+            "# - For multi-input, inputs.get(\"input\", []) is a list. Use input_data[0].get(\"field\") for slot 0.\n"
+            "# - For multi-output, return outputs[\"output\"] as a list; slot 0 sends output[0], slot 1 sends output[1].\n"
+            "# vws:input input dimension=1 labels=1\n"
+            "# vws:output output dimension=1 labels=1\n");
+    }
+    return {};
+}
+
+QString normalizedOutputFileName(const QString& fileName)
+{
+    const auto trimmed = fileName.trimmed();
+    return trimmed.isEmpty() ? QStringLiteral("output.csv") : trimmed;
+}
+
+bool replacePythonAssignment(QString* code, const QString& variableName, const QString& expression, QString* errorMessage)
+{
+    const QRegularExpression pattern(
+        QStringLiteral(R"(^(\s*)%1\s*=.*$)").arg(QRegularExpression::escape(variableName)),
+        QRegularExpression::MultilineOption);
+    const auto match = pattern.match(*code);
+    if (!match.hasMatch()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Cannot find Python assignment line: %1 = ...").arg(variableName);
+        }
+        return false;
+    }
+
+    const auto replacement = QStringLiteral("%1%2 = %3")
+        .arg(match.captured(1), variableName, expression);
+    code->replace(match.capturedStart(0), match.capturedLength(0), replacement);
+    return true;
 }
 
 } // namespace
@@ -104,9 +164,94 @@ QString PythonCodeTemplates::codeForTemplate(DataTransferTemplate transferTempla
     return functionDataToDataCode();
 }
 
+bool PythonCodeTemplates::isFileOutputTemplate(DataTransferTemplate transferTemplate)
+{
+    return transferTemplate == DataTransferTemplate::FileOutput
+        || transferTemplate == DataTransferTemplate::DataToFile
+        || transferTemplate == DataTransferTemplate::FileToFile;
+}
+
+QString PythonCodeTemplates::defaultOutputFileName()
+{
+    return QStringLiteral("output.csv");
+}
+
+QString PythonCodeTemplates::outputFileNameFromCode(const QString& code)
+{
+    const QRegularExpression pattern(
+        QStringLiteral(R"(^\s*output_file_path\s*=\s*["']([^"'\r\n]+)["'])"),
+        QRegularExpression::MultilineOption);
+    const auto match = pattern.match(code);
+    if (!match.hasMatch()) {
+        return defaultOutputFileName();
+    }
+    return normalizedOutputFileName(match.captured(1));
+}
+
+QString PythonCodeTemplates::codeWithOutputFileName(const QString& code, const QString& fileName)
+{
+    auto updated = code;
+    tryApplyOutputFileName(code, fileName, &updated);
+    return updated;
+}
+
+bool PythonCodeTemplates::tryApplyOutputFileName(const QString& code, const QString& fileName, QString* updatedCode, QString* errorMessage)
+{
+    if (updatedCode == nullptr) {
+        return false;
+    }
+
+    auto updated = code;
+    if (!replacePythonAssignment(
+            &updated,
+            QStringLiteral("output_file_path"),
+            pythonStringLiteral(normalizedOutputFileName(fileName)),
+            errorMessage)) {
+        return false;
+    }
+
+    *updatedCode = updated;
+    return true;
+}
+
+bool PythonCodeTemplates::tryApplyAgentSettings(
+    const QString& code,
+    const QString& url,
+    const QString& model,
+    const QString& apiKey,
+    int maxRetries,
+    const QString& backgroundPrompt,
+    const QString& taskPrompt,
+    QString* updatedCode,
+    QString* errorMessage)
+{
+    if (updatedCode == nullptr) {
+        return false;
+    }
+
+    auto updated = code;
+    const QList<QPair<QString, QString>> replacements = {
+        {QStringLiteral("base_url"), QStringLiteral("%1.strip()").arg(pythonStringLiteral(url))},
+        {QStringLiteral("model_name"), QStringLiteral("%1.strip()").arg(pythonStringLiteral(model))},
+        {QStringLiteral("api_key"), QStringLiteral("%1.strip()").arg(pythonStringLiteral(apiKey))},
+        {QStringLiteral("max_retries"), QStringLiteral("max(1, int(%1))").arg(maxRetries)},
+        {QStringLiteral("background_prompt"), pythonStringLiteral(backgroundPrompt)},
+        {QStringLiteral("task_prompt"), pythonStringLiteral(taskPrompt)},
+    };
+
+    for (const auto& replacement : replacements) {
+        if (!replacePythonAssignment(&updated, replacement.first, replacement.second, errorMessage)) {
+            return false;
+        }
+    }
+
+    *updatedCode = updated;
+    return true;
+}
+
 QString PythonCodeTemplates::starterEmptyOutputCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::EmptyOutput) + QStringLiteral(
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Starter node with no initial business payload.\n"
         "\n"
@@ -123,13 +268,14 @@ QString PythonCodeTemplates::starterEmptyOutputCode()
 
 QString PythonCodeTemplates::starterDataOutputCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::DataOutput) + QStringLiteral(
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Create the first small JSON-serializable business data package.\"\"\"\n"
+        "    # For multiple output circles, change the # vws:output dimension above\n"
+        "    # and set output_data to a list with the same number of items.\n"
         "    output_data = {\n"
-        "        # Example:\n"
-        "        # \"a\": 1,\n"
-        "        # \"b\": 2,\n"
+        "        # Add your business fields here, for example:\n"
+        "        # \"field_name\": \"value\",\n"
         "    }\n"
         "\n"
         "    return {\n"
@@ -142,55 +288,41 @@ QString PythonCodeTemplates::starterDataOutputCode()
 
 QString PythonCodeTemplates::starterFileOutputCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::FileOutput) + QStringLiteral(
         "from pathlib import Path\n"
         "\n"
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Create a file artifact and pass its path downstream.\n"
         "\n"
-        "    This template intentionally does not force a file type.\n"
-        "    You can change file_name, file_type, and writing logic to produce any file type.\n"
+        "    The editor's Output file name field updates output_file_path below.\n"
         "    \"\"\"\n"
         "\n"
         "    artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n"
         "    artifact_dir.mkdir(parents=True, exist_ok=True)\n"
         "\n"
-        "    file_name = \"output\"\n"
-        "    file_type = \"\"\n"
-        "    output_path = artifact_dir / file_name\n"
+        "    output_file_path = \"output.csv\"\n"
+        "    output_path = artifact_dir / output_file_path\n"
         "\n"
-        "    output_path.write_text(\"\", encoding=\"utf-8\")\n"
-        "\n"
-        "    # You can use any file type:\n"
-        "    # file_type = \"txt\"\n"
-        "    # file_type = \"json\"\n"
-        "    # file_type = \"md\"\n"
-        "    # file_type = \"csv\"\n"
-        "    # file_type = \"png\"\n"
-        "    # file_type = \"pdf\"\n"
-        "    # file_type = \"xlsx\"\n"
-        "    #\n"
-        "    # CSV example:\n"
-        "    # file_name = \"output.csv\"\n"
-        "    # file_type = \"csv\"\n"
-        "    # output_path = artifact_dir / file_name\n"
+        "    # Write your CSV or any other file content here.\n"
+        "    # CSV skeleton:\n"
         "    # import csv\n"
         "    # with output_path.open(\"w\", encoding=\"utf-8\", newline=\"\") as file:\n"
         "    #     writer = csv.DictWriter(file, fieldnames=[\"column_a\", \"column_b\"])\n"
         "    #     writer.writeheader()\n"
-        "    #     writer.writerow({\"column_a\": \"value\", \"column_b\": 1})\n"
+        "    #     writer.writerow({\"column_a\": \"\", \"column_b\": \"\"})\n"
+        "    output_path.write_text(\"\", encoding=\"utf-8\")\n"
         "\n"
         "    return {\n"
         "        \"outputs\": {\n"
         "            \"output\": {\n"
         "                \"file_path\": str(output_path),\n"
-        "                \"format\": file_type,\n"
+        "                \"format\": output_path.suffix.lstrip(\".\"),\n"
         "                \"size_bytes\": output_path.stat().st_size,\n"
         "            }\n"
         "        },\n"
         "        \"artifacts\": [\n"
         "            {\n"
-        "                \"type\": file_type,\n"
+        "                \"type\": output_path.suffix.lstrip(\".\"),\n"
         "                \"path\": str(output_path),\n"
         "                \"metadata\": {\n"
         "                    \"size_bytes\": output_path.stat().st_size,\n"
@@ -202,14 +334,14 @@ QString PythonCodeTemplates::starterFileOutputCode()
 
 QString PythonCodeTemplates::functionDataToDataCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::DataToData) + QStringLiteral(
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Read small upstream business data and return small business data.\"\"\"\n"
         "    input_data = inputs.get(\"input\", {})\n"
         "\n"
-        "    # Business code here.\n"
-        "    # Example:\n"
-        "    # result = {\"value\": input_data[...].get(\"value\")}\n"
+        "    # If dimension=1, input_data is usually a dict and you can use input_data.get(\"field\").\n"
+        "    # If dimension>1, input_data is a list; use input_data[0].get(\"field\") for slot 0.\n"
+        "    # Write your business logic here.\n"
         "    result = {}\n"
         "\n"
         "    return {\n"
@@ -222,47 +354,43 @@ QString PythonCodeTemplates::functionDataToDataCode()
 
 QString PythonCodeTemplates::functionDataToFileCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::DataToFile) + QStringLiteral(
         "from pathlib import Path\n"
         "\n"
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Read small upstream business data and write a file artifact.\n"
         "\n"
-        "    This template intentionally does not force a file type.\n"
-        "    You can change file_name, file_type, and writing logic to produce any file type.\n"
+        "    The editor's Output file name field updates output_file_path below.\n"
         "    \"\"\"\n"
         "    input_data = inputs.get(\"input\", {})\n"
+        "    # If dimension=1, input_data is usually a dict and you can use input_data.get(\"field\").\n"
+        "    # If dimension>1, input_data is a list; use input_data[0].get(\"field\") for slot 0.\n"
         "    artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n"
         "    artifact_dir.mkdir(parents=True, exist_ok=True)\n"
         "\n"
-        "    file_name = \"output\"\n"
-        "    file_type = \"\"\n"
-        "    output_path = artifact_dir / file_name\n"
+        "    output_file_path = \"output.csv\"\n"
+        "    output_path = artifact_dir / output_file_path\n"
         "\n"
-        "    # Write the file here. This default writes empty text.\n"
-        "    output_path.write_text(\"\", encoding=\"utf-8\")\n"
-        "\n"
-        "    # CSV example:\n"
-        "    # file_name = \"output.csv\"\n"
-        "    # file_type = \"csv\"\n"
-        "    # output_path = artifact_dir / file_name\n"
+        "    # Write your CSV or any other file content here.\n"
+        "    # CSV skeleton:\n"
         "    # import csv\n"
         "    # with output_path.open(\"w\", encoding=\"utf-8\", newline=\"\") as file:\n"
         "    #     writer = csv.DictWriter(file, fieldnames=[\"column_a\", \"column_b\"])\n"
         "    #     writer.writeheader()\n"
-        "    #     writer.writerow({\"column_a\": input_data.get(\"a\"), \"column_b\": input_data.get(\"b\")})\n"
+        "    #     writer.writerow({\"column_a\": \"\", \"column_b\": \"\"})\n"
+        "    output_path.write_text(\"\", encoding=\"utf-8\")\n"
         "\n"
         "    return {\n"
         "        \"outputs\": {\n"
         "            \"output\": {\n"
         "                \"file_path\": str(output_path),\n"
-        "                \"format\": file_type,\n"
+        "                \"format\": output_path.suffix.lstrip(\".\"),\n"
         "                \"size_bytes\": output_path.stat().st_size,\n"
         "            }\n"
         "        },\n"
         "        \"artifacts\": [\n"
         "            {\n"
-        "                \"type\": file_type,\n"
+        "                \"type\": output_path.suffix.lstrip(\".\"),\n"
         "                \"path\": str(output_path),\n"
         "                \"metadata\": {\"size_bytes\": output_path.stat().st_size},\n"
         "            }\n"
@@ -272,7 +400,7 @@ QString PythonCodeTemplates::functionDataToFileCode()
 
 QString PythonCodeTemplates::functionFileToDataCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::FileToData) + QStringLiteral(
         "from pathlib import Path\n"
         "\n"
         "def run(inputs: dict, context: dict) -> dict:\n"
@@ -282,11 +410,16 @@ QString PythonCodeTemplates::functionFileToDataCode()
         "    Read the upstream file and extract the data you need.\n"
         "    \"\"\"\n"
         "    input_data = inputs.get(\"input\", {})\n"
-        "    source_path = Path(input_data.get(\"file_path\", \"\"))\n"
+        "    # If dimension=1, input_data is usually a dict and you can use input_data.get(\"file_path\").\n"
+        "    # If dimension>1, input_data is a list; use input_data[0].get(\"file_path\") for slot 0.\n"
+        "    file_input = input_data[0] if isinstance(input_data, list) and input_data else input_data\n"
+        "    if not isinstance(file_input, dict):\n"
+        "        file_input = {}\n"
+        "    source_path = Path(file_input.get(\"file_path\", \"\"))\n"
         "    if not source_path.exists():\n"
         "        raise FileNotFoundError(f\"Input file does not exist: {source_path}\")\n"
         "\n"
-        "    source_format = input_data.get(\"format\", \"\")\n"
+        "    source_format = file_input.get(\"format\", \"\")\n"
         "\n"
         "    result = {\n"
         "        \"file_path\": str(source_path),\n"
@@ -295,7 +428,7 @@ QString PythonCodeTemplates::functionFileToDataCode()
         "        # Add derived data here.\n"
         "    }\n"
         "\n"
-        "    # CSV example:\n"
+        "    # CSV skeleton:\n"
         "    # import csv\n"
         "    # with source_path.open(\"r\", encoding=\"utf-8\", newline=\"\") as file:\n"
         "    #     reader = csv.DictReader(file)\n"
@@ -313,34 +446,33 @@ QString PythonCodeTemplates::functionFileToDataCode()
 
 QString PythonCodeTemplates::functionFileToFileCode()
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(DataTransferTemplate::FileToFile) + QStringLiteral(
         "from pathlib import Path\n"
         "\n"
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Read an upstream file and produce a new file artifact.\n"
         "\n"
-        "    This template copies the source file as a simple default.\n"
-        "    Replace the copy logic with any transformation you need.\n"
+        "    The editor's Output file name field updates output_file_path below.\n"
         "    \"\"\"\n"
         "    input_data = inputs.get(\"input\", {})\n"
-        "    source_path = Path(input_data.get(\"file_path\", \"\"))\n"
+        "    # If dimension=1, input_data is usually a dict and you can use input_data.get(\"file_path\").\n"
+        "    # If dimension>1, input_data is a list; use input_data[0].get(\"file_path\") for slot 0.\n"
+        "    file_input = input_data[0] if isinstance(input_data, list) and input_data else input_data\n"
+        "    if not isinstance(file_input, dict):\n"
+        "        file_input = {}\n"
+        "    source_path = Path(file_input.get(\"file_path\", \"\"))\n"
         "    if not source_path.exists():\n"
         "        raise FileNotFoundError(f\"Input file does not exist: {source_path}\")\n"
         "\n"
         "    artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n"
         "    artifact_dir.mkdir(parents=True, exist_ok=True)\n"
         "\n"
-        "    file_name = \"output\"\n"
-        "    file_type = \"\"\n"
-        "    output_path = artifact_dir / file_name\n"
+        "    output_file_path = \"output.csv\"\n"
+        "    output_path = artifact_dir / output_file_path\n"
         "\n"
-        "    # Copy the source file as a default. Replace with your own transformation.\n"
-        "    output_path.write_bytes(source_path.read_bytes())\n"
-        "\n"
-        "    # CSV transformation example:\n"
-        "    # file_name = \"output.csv\"\n"
-        "    # file_type = \"csv\"\n"
-        "    # output_path = artifact_dir / file_name\n"
+        "    # Write your transformed CSV or any other file content here.\n"
+        "    # This default copies bytes from the source file.\n"
+        "    # CSV skeleton:\n"
         "    # import csv\n"
         "    # with source_path.open(\"r\", encoding=\"utf-8\", newline=\"\") as source_file:\n"
         "    #     reader = csv.DictReader(source_file)\n"
@@ -349,19 +481,20 @@ QString PythonCodeTemplates::functionFileToFileCode()
         "    #         writer.writeheader()\n"
         "    #         for row in reader:\n"
         "    #             writer.writerow(row)\n"
+        "    output_path.write_bytes(source_path.read_bytes())\n"
         "\n"
         "    return {\n"
         "        \"outputs\": {\n"
         "            \"output\": {\n"
         "                \"file_path\": str(output_path),\n"
         "                \"source_file\": str(source_path),\n"
-        "                \"format\": file_type,\n"
+        "                \"format\": output_path.suffix.lstrip(\".\"),\n"
         "                \"size_bytes\": output_path.stat().st_size,\n"
         "            }\n"
         "        },\n"
         "        \"artifacts\": [\n"
         "            {\n"
-        "                \"type\": file_type,\n"
+        "                \"type\": output_path.suffix.lstrip(\".\"),\n"
         "                \"path\": str(output_path),\n"
         "                \"metadata\": {\n"
         "                    \"source_file\": str(source_path),\n"
@@ -431,7 +564,7 @@ QString PythonCodeTemplates::agentCode(
     const QString& taskPrompt,
     DataTransferTemplate transferTemplate)
 {
-    return QStringLiteral(
+    return ioSpecCommentForTemplate(transferTemplate) + QStringLiteral(
         "import json\n"
         "import time\n"
         "import urllib.error\n"
@@ -462,6 +595,8 @@ QString PythonCodeTemplates::agentCode(
         "def run(inputs: dict, context: dict) -> dict:\n"
         "    \"\"\"Run an OpenAI-compatible chat completion as an Agent node.\"\"\"\n"
         "    input_data = inputs.get(\"input\", {})\n"
+        "    # If dimension=1, input_data is usually a dict.\n"
+        "    # If dimension>1, input_data is a list; use input_data[0].get(\"field\") for slot 0.\n"
         "    input_mode = %6\n"
         "    output_mode = %7\n"
         "\n"
@@ -483,7 +618,10 @@ QString PythonCodeTemplates::agentCode(
         "        raise RuntimeError(\"Agent api_key is required.\")\n"
         "\n"
         "    if input_mode == \"file\":\n"
-        "        source_path = Path(input_data.get(\"file_path\", \"\"))\n"
+        "        file_input = input_data[0] if isinstance(input_data, list) and input_data else input_data\n"
+        "        if not isinstance(file_input, dict):\n"
+        "            file_input = {}\n"
+        "        source_path = Path(file_input.get(\"file_path\", \"\"))\n"
         "        if not source_path.exists():\n"
         "            raise FileNotFoundError(f\"Input file does not exist: {source_path}\")\n"
         "        with source_path.open(\"r\", encoding=\"utf-8\") as file:\n"
@@ -546,25 +684,22 @@ QString PythonCodeTemplates::agentCode(
         "    if output_mode == \"file\":\n"
         "        artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n"
         "        artifact_dir.mkdir(parents=True, exist_ok=True)\n"
-        "        file_name = \"agent_result\"\n"
-        "        file_type = \"\"\n"
-        "        output_path = artifact_dir / file_name\n"
-        "        # If you ask the model to return CSV, you may change:\n"
-        "        # file_name = \"agent_result.csv\"\n"
-        "        # file_type = \"csv\"\n"
+        "        output_file_path = \"output.csv\"\n"
+        "        output_path = artifact_dir / output_file_path\n"
+        "        # The editor's Output file name field updates output_file_path above.\n"
         "        output_path.write_text(content, encoding=\"utf-8\")\n"
         "        return {\n"
         "            \"outputs\": {\n"
         "                \"output\": {\n"
         "                    \"file_path\": str(output_path),\n"
-        "                    \"format\": file_type,\n"
+        "                    \"format\": output_path.suffix.lstrip(\".\"),\n"
         "                    \"size_bytes\": output_path.stat().st_size,\n"
         "                    \"retry_count\": retry_count,\n"
         "                    \"max_retries\": max_retries,\n"
         "                }\n"
         "            },\n"
         "            \"artifacts\": [\n"
-        "                {\"type\": file_type, \"path\": str(output_path), \"metadata\": {\"size_bytes\": output_path.stat().st_size, \"retry_count\": retry_count, \"max_retries\": max_retries}}\n"
+        "                {\"type\": output_path.suffix.lstrip(\".\"), \"path\": str(output_path), \"metadata\": {\"size_bytes\": output_path.stat().st_size, \"retry_count\": retry_count, \"max_retries\": max_retries}}\n"
         "            ],\n"
         "        }\n"
         "\n"

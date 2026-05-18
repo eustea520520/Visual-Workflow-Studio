@@ -35,6 +35,7 @@ public:
         AppStore& store);
 
     WorkspaceBrowserSnapshot snapshot() const;
+    bool deleteWorkflowAndRuns(const QString& workflowId, int* deletedRunCount = nullptr, QString* errorMessage = nullptr);
 
 private:
     application::WorkflowService& m_workflowService;

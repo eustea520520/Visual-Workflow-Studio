@@ -2,6 +2,7 @@
 
 #include "application/WorkflowClipboard.h"
 #include "application/WorkflowHistory.h"
+#include "domain/EdgeEndpoint.h"
 #include "domain/Workflow.h"
 #include "ui/canvas/EdgeDragController.h"
 #include "ui/canvas/NodeGraphicsItem.h"
@@ -9,6 +10,7 @@
 #include "ui/canvas/WorkflowCanvasInteractionController.h"
 
 #include <QGraphicsView>
+#include <QHash>
 #include <QList>
 #include <optional>
 #include <QPointF>
@@ -43,6 +45,8 @@ public:
     bool connectSelectedNodes();
     void clearWorkflow();
     bool updateNode(const domain::Node& node);
+    void setNodeIoSpec(const QString& nodeId, const domain::NodeIoSpec& spec);
+    void applyRuntimeIoSpecs(const QHash<QString, domain::NodeIoSpec>& specsByNodeId);
     void setNodeStatus(const QString& nodeId, const QString& status);
     void refreshTheme();
 
@@ -75,16 +79,21 @@ private:
     void addNodeItem(const domain::Node& node);
     void addEdgeItem(const domain::Edge& edge);
     bool createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId);
+    bool createEdgeBetween(const domain::EdgeEndpoint& source, const domain::EdgeEndpoint& target);
     void updateEdgesForNode(const QString& nodeId);
     void updateAllEdgeRoutes();
     void deleteSelectedItems();
     void removeEdge(const QString& edgeId);
     void removeNode(const QString& nodeId);
+    bool rotateSelectedNode(int deltaDegrees);
+    bool rotateNode(const QString& nodeId, int deltaDegrees);
     void syncWorkflowFromItems();
     void pushUndoState();
     void undoLastChange();
     NodeGraphicsItem* outputNodeAt(const QPointF& scenePos) const;
     NodeGraphicsItem* inputNodeAt(const QPointF& scenePos, const QString& excludedNodeId = {}) const;
+    std::optional<PortSlotHit> outputSlotAt(const QPointF& scenePos) const;
+    std::optional<PortSlotHit> inputSlotAt(const QPointF& scenePos, const QString& excludedNodeId = {}) const;
     NodeVisualState visualStateFromStatus(const QString& status) const;
     QList<NodeGraphicsItem*> selectedNodeItems() const;
     void copySelectedNodes();

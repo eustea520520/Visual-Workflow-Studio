@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain/NodeIoSpec.h"
+
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -36,8 +38,10 @@ struct Node {
     QString name;
     QString description;
     NodePosition position;
+    int rotationDegrees = 0;
     QStringList inputPorts;
     QStringList outputPorts;
+    NodeIoSpec ioSpec;
     // config 保存不同节点类型自己的配置。
     // starter、function、agent 当前都放 Python 代码，并通过 PythonNodeWorker 执行。
     QJsonObject config;

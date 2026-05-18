@@ -27,6 +27,24 @@ vws::domain::Workflow loadWorkflow(vws::application::WorkflowService& service, c
     return workflow;
 }
 
+void setIoDimension(vws::domain::Node& node, int inputDimension, int outputDimension)
+{
+    node.ioSpec.inputs.clear();
+    node.ioSpec.outputs.clear();
+    if (!node.inputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec input;
+        input.portName = "input";
+        input.dimension = inputDimension;
+        node.ioSpec.inputs.append(input);
+    }
+    if (!node.outputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec output;
+        output.portName = "output";
+        output.dimension = outputDimension;
+        node.ioSpec.outputs.append(output);
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -126,6 +144,43 @@ int main(int argc, char* argv[])
 
     const auto cyclicResult = validator.validate(cyclicWorkflow);
     if (const auto result = expect(!cyclicResult.valid, "Cycle should be invalid")) {
+        return result;
+    }
+
+    auto slotWorkflow = simpleWorkflow;
+    setIoDimension(slotWorkflow.nodes[0], 1, 3);
+    setIoDimension(slotWorkflow.nodes[1], 3, 1);
+    slotWorkflow.edges[0].fromSlot = 1;
+    slotWorkflow.edges[0].toSlot = 2;
+    const auto slotResult = validator.validate(slotWorkflow);
+    if (const auto result = expect(slotResult.valid, "Valid slot-level edge should pass graph validation")) {
+        return result;
+    }
+
+    auto outOfRangeSlotWorkflow = slotWorkflow;
+    outOfRangeSlotWorkflow.edges[0].fromSlot = 3;
+    const auto outOfRangeSlotResult = validator.validate(outOfRangeSlotWorkflow);
+    if (const auto result = expect(!outOfRangeSlotResult.valid, "fromSlot beyond output dimension should be invalid")) {
+        return result;
+    }
+
+    auto duplicateSlotWorkflow = slotWorkflow;
+    auto duplicateEdge = duplicateSlotWorkflow.edges[0];
+    duplicateEdge.edgeId = "edge-duplicate-slot";
+    duplicateSlotWorkflow.edges.append(duplicateEdge);
+    const auto duplicateSlotResult = validator.validate(duplicateSlotWorkflow);
+    if (const auto result = expect(!duplicateSlotResult.valid, "Multiple edges writing one input slot should be invalid")) {
+        return result;
+    }
+
+    auto mixedPortWorkflow = slotWorkflow;
+    auto wholePortEdge = mixedPortWorkflow.edges[0];
+    wholePortEdge.edgeId = "edge-whole-port";
+    wholePortEdge.fromSlot = -1;
+    wholePortEdge.toSlot = -1;
+    mixedPortWorkflow.edges.append(wholePortEdge);
+    const auto mixedPortResult = validator.validate(mixedPortWorkflow);
+    if (const auto result = expect(!mixedPortResult.valid, "Whole-port and slot-level edges on one input port should not mix")) {
         return result;
     }
 

@@ -20,6 +20,14 @@ namespace {
 constexpr qreal EdgeHitWidth = 12.0;
 constexpr qreal EdgeParallelStep = 8.0;
 
+QString endpointText(const QString& nodeId, const QString& portName, int slotIndex)
+{
+    if (slotIndex < 0) {
+        return QStringLiteral("%1.%2").arg(nodeId, portName);
+    }
+    return QStringLiteral("%1.%2[%3]").arg(nodeId, portName).arg(slotIndex + 1);
+}
+
 } // namespace
 
 EdgeGraphicsItem::EdgeGraphicsItem(domain::Edge edge, NodeGraphicsItem* sourceNode, NodeGraphicsItem* targetNode, QGraphicsItem* parent)
@@ -31,6 +39,9 @@ EdgeGraphicsItem::EdgeGraphicsItem(domain::Edge edge, NodeGraphicsItem* sourceNo
     setFlag(ItemIsSelectable);
     setAcceptHoverEvents(true);
     setZValue(CanvasZ::Edge);
+    setToolTip(QStringLiteral("%1 -> %2").arg(
+        endpointText(m_edge.fromNode, m_edge.fromPort, m_edge.fromSlot),
+        endpointText(m_edge.toNode, m_edge.toPort, m_edge.toSlot)));
     updatePath();
 }
 
@@ -75,8 +86,8 @@ void EdgeGraphicsItem::updatePath()
     prepareGeometryChange();
 
     EdgeRouteRequest request;
-    request.sourcePortScenePos = m_sourceNode->outputAnchorScenePos();
-    request.targetPortScenePos = m_targetNode->inputAnchorScenePos();
+    request.sourcePortScenePos = m_sourceNode->outputAnchorScenePos(m_edge.fromSlot);
+    request.targetPortScenePos = m_targetNode->inputAnchorScenePos(m_edge.toSlot);
     request.sourceNodeRect = m_sourceNode->bodySceneRect();
     request.targetNodeRect = m_targetNode->bodySceneRect();
     request.obstacleNodeRects = m_obstacleRects;

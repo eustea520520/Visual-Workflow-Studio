@@ -32,15 +32,17 @@ if(VWS_ENABLE_UBSAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_link_options(-fsanitize=undefined)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
 set(DOMAIN_SOURCES
     src/domain/Workspace.h src/domain/Workspace.cpp
     src/domain/Workflow.h src/domain/Workflow.cpp
     src/domain/Node.h src/domain/Node.cpp
+    src/domain/NodeIoSpec.h src/domain/NodeIoSpec.cpp
     src/domain/NodeConfigKeys.h
     src/domain/NodeConfigView.h
     src/domain/NodeTypes.h
+    src/domain/EdgeEndpoint.h
     src/domain/Edge.h src/domain/Edge.cpp
     src/domain/NodeTemplate.h src/domain/NodeTemplate.cpp
     src/domain/Artifact.h src/domain/Artifact.cpp
@@ -50,6 +52,8 @@ set(DOMAIN_SOURCES
 set(INFRA_SOURCES
     src/infrastructure/JsonUtils.h src/infrastructure/JsonUtils.cpp
     src/infrastructure/FileSystemUtils.h src/infrastructure/FileSystemUtils.cpp
+    src/infrastructure/llm/LlmChatTypes.h
+    src/infrastructure/llm/LlmChatClient.h src/infrastructure/llm/LlmChatClient.cpp
 )
 
 set(APPLICATION_SOURCES
@@ -63,6 +67,19 @@ set(APPLICATION_SOURCES
     src/application/WorkflowService.h src/application/WorkflowService.cpp
     src/application/NodeTemplateService.h src/application/NodeTemplateService.cpp
     src/application/RunService.h src/application/RunService.cpp
+    src/application/io/NodeIoSpecUtils.h src/application/io/NodeIoSpecUtils.cpp
+    src/application/io/PythonIoDimensionAnalyzer.h src/application/io/PythonIoDimensionAnalyzer.cpp
+    src/application/io/NodeIoSpecValidator.h src/application/io/NodeIoSpecValidator.cpp
+    src/application/generation/WorkflowGenerationTypes.h src/application/generation/WorkflowGenerationTypes.cpp
+    src/application/generation/WorkflowGenerationTemplateCatalog.h src/application/generation/WorkflowGenerationTemplateCatalog.cpp
+    src/application/generation/WorkflowGenerationPromptBuilder.h src/application/generation/WorkflowGenerationPromptBuilder.cpp
+    src/application/generation/WorkflowSkeletonValidator.h src/application/generation/WorkflowSkeletonValidator.cpp
+    src/application/generation/WorkflowNodeImplementationValidator.h src/application/generation/WorkflowNodeImplementationValidator.cpp
+    src/application/generation/WorkflowGenerationAssembler.h src/application/generation/WorkflowGenerationAssembler.cpp
+    src/application/generation/WorkflowGenerationValidator.h src/application/generation/WorkflowGenerationValidator.cpp
+    src/application/generation/WorkflowGenerationNormalizer.h src/application/generation/WorkflowGenerationNormalizer.cpp
+    src/application/generation/WorkflowAutoLayout.h src/application/generation/WorkflowAutoLayout.cpp
+    src/application/generation/WorkflowGenerationService.h src/application/generation/WorkflowGenerationService.cpp
 )
 
 set(PRESENTATION_SOURCES
@@ -75,6 +92,8 @@ set(PRESENTATION_SOURCES
     src/presentation/controllers/NodeTemplateController.h src/presentation/controllers/NodeTemplateController.cpp
     src/presentation/controllers/RunController.h src/presentation/controllers/RunController.cpp
     src/presentation/controllers/WorkspaceBrowserController.h src/presentation/controllers/WorkspaceBrowserController.cpp
+    src/presentation/controllers/WorkflowIoController.h src/presentation/controllers/WorkflowIoController.cpp
+    src/presentation/controllers/WorkflowGenerationController.h src/presentation/controllers/WorkflowGenerationController.cpp
 )
 
 set(EXECUTION_SOURCES
@@ -120,6 +139,9 @@ set(UI_SOURCES
     src/ui/canvas/WorkflowCanvasInteractionController.h src/ui/canvas/WorkflowCanvasInteractionController.cpp
     src/ui/canvas/WorkflowSceneController.h src/ui/canvas/WorkflowSceneController.cpp
     src/ui/canvas/EdgeDragController.h src/ui/canvas/EdgeDragController.cpp
+    src/ui/canvas/NodePortSlotViewModel.h
+    src/ui/canvas/NodePortSlotViewModelBuilder.h src/ui/canvas/NodePortSlotViewModelBuilder.cpp
+    src/ui/canvas/PortSlotHit.h
     src/ui/canvas/NodeGraphicsItem.h src/ui/canvas/NodeGraphicsItem.cpp
     src/ui/canvas/EdgeGraphicsItem.h src/ui/canvas/EdgeGraphicsItem.cpp
     src/ui/canvas/CanvasZ.h
@@ -132,6 +154,8 @@ set(UI_SOURCES
     src/ui/editor/PythonNodeEditorDialog.h src/ui/editor/PythonNodeEditorDialog.cpp
     src/ui/editor/PythonSyntaxHighlighter.h src/ui/editor/PythonSyntaxHighlighter.cpp
     src/ui/editor/PythonCompleter.h src/ui/editor/PythonCompleter.cpp
+    src/ui/generation/WorkflowGenerationDialogViewModel.h
+    src/ui/generation/WorkflowGenerationDialog.h src/ui/generation/WorkflowGenerationDialog.cpp
     src/ui/inspector/NodeInspectorViewModel.h
     src/ui/inspector/NodeInspector.h src/ui/inspector/NodeInspector.cpp
     src/ui/output/OutputPanelViewModel.h
@@ -157,6 +181,7 @@ target_link_libraries(vws_domain PUBLIC Qt6::Core)
 add_library(vws_infrastructure STATIC ${INFRA_SOURCES})
 target_include_directories(vws_infrastructure PUBLIC src)
 target_link_libraries(vws_infrastructure PUBLIC Qt6::Core)
+target_link_libraries(vws_infrastructure PUBLIC Qt6::Network)
 
 add_library(vws_application STATIC ${APPLICATION_SOURCES})
 target_include_directories(vws_application PUBLIC src)
@@ -229,6 +254,26 @@ vws_add_test(node_factory
     tests/unit/test_node_factory.cpp
 )
 
+vws_add_test(node_io_spec
+    tests/unit/test_node_io_spec.cpp
+)
+
+vws_add_test(python_io_dimension_analyzer
+    tests/unit/test_python_io_dimension_analyzer.cpp
+)
+
+vws_add_test(workflow_generation_prompt
+    tests/unit/test_workflow_generation_prompt.cpp
+)
+
+vws_add_test(workflow_generation_validator
+    tests/unit/test_workflow_generation_validator.cpp
+)
+
+vws_add_test(workflow_generation_multistage
+    tests/unit/test_workflow_generation_multistage.cpp
+)
+
 vws_add_test(presentation_state
     tests/unit/test_presentation_state.cpp
 )
@@ -286,6 +331,14 @@ target_link_libraries(test_python_editor PRIVATE vws_ui Qt6::Widgets)
 add_test(NAME python_editor COMMAND test_python_editor)
 set_tests_properties(python_editor PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+qt_add_executable(test_workflow_generation_dialog
+    tests/unit/test_workflow_generation_dialog.cpp
+)
+target_include_directories(test_workflow_generation_dialog PRIVATE src)
+target_link_libraries(test_workflow_generation_dialog PRIVATE vws_ui Qt6::Widgets)
+add_test(NAME workflow_generation_dialog COMMAND test_workflow_generation_dialog)
+set_tests_properties(workflow_generation_dialog PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
     set(VWS_WINDOWS_TEST_PATH
         "PATH=path_list_prepend:C:/Qt/Tools/mingw1120_64/bin"
@@ -307,6 +360,12 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
             main_window_layout_builder
             run_service
             python_editor
+            node_io_spec
+            python_io_dimension_analyzer
+            workflow_generation_prompt
+            workflow_generation_validator
+            workflow_generation_multistage
+            workflow_generation_dialog
         PROPERTIES ENVIRONMENT_MODIFICATION "${VWS_WINDOWS_TEST_PATH}"
     )
 endif()

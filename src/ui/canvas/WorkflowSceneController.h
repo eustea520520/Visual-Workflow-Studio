@@ -2,6 +2,8 @@
 
 #include "domain/Workflow.h"
 #include "ui/canvas/NodeGraphicsItem.h"
+#include "ui/canvas/NodePortSlotViewModel.h"
+#include "ui/canvas/PortSlotHit.h"
 
 #include <QHash>
 #include <QObject>
@@ -41,9 +43,18 @@ public:
     void syncWorkflowNodes(domain::Workflow& workflow) const;
     void updateAllEdgeRoutes(const domain::Workflow& workflow);
     void setNodeStatus(const QString& nodeId, NodeVisualState visualState);
+    void setNodePortSlots(
+        const QString& nodeId,
+        const QList<NodePortSlotViewModel>& inputSlots,
+        const QList<NodePortSlotViewModel>& outputSlots);
     void refreshItems();
     NodeGraphicsItem* outputNodeAt(const QPointF& scenePos, qreal hitRadius) const;
     NodeGraphicsItem* inputNodeAt(const QPointF& scenePos, qreal hitRadius, const QString& excludedNodeId = {}) const;
+    std::optional<PortSlotHit> outputSlotAt(const QPointF& scenePos, qreal hitRadius) const;
+    std::optional<PortSlotHit> inputSlotAt(
+        const QPointF& scenePos,
+        qreal hitRadius,
+        const QString& excludedNodeId = {}) const;
 
 signals:
     void nodeMoved(const QString& nodeId);

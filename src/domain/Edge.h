@@ -11,8 +11,10 @@ struct Edge {
     QString edgeId;
     QString fromNode;
     QString fromPort;
+    int fromSlot = -1;
     QString toNode;
     QString toPort;
+    int toSlot = -1;
 
     QJsonObject toJson() const;
     static Edge fromJson(const QJsonObject& object);

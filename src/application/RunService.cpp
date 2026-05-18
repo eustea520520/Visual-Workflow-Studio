@@ -136,6 +136,55 @@ bool RunService::loadRunRecord(
     return true;
 }
 
+bool RunService::deleteRunsForWorkflow(
+    const QString& workspaceRootPath,
+    const QString& workflowId,
+    int* deletedRunCount,
+    QString* errorMessage) const
+{
+    if (deletedRunCount != nullptr) {
+        *deletedRunCount = 0;
+    }
+    if (workspaceRootPath.trimmed().isEmpty() || workflowId.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Workspace path or workflow id is empty.");
+        }
+        return false;
+    }
+
+    const auto runDirectories = QDir(QDir(workspaceRootPath).filePath("runs")).entryInfoList(
+        QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable,
+        QDir::Name);
+
+    for (const auto& runDirectory : runDirectories) {
+        QJsonObject object;
+        const auto runDirectoryPath = runDirectory.absoluteFilePath();
+        const auto recordPath = QDir(runDirectoryPath).filePath("run_record.json");
+        if (!infrastructure::JsonUtils::readObjectFromFile(recordPath, object, nullptr)) {
+            continue;
+        }
+
+        const auto record = domain::RunRecord::fromJson(object);
+        if (record.workflowId != workflowId) {
+            continue;
+        }
+
+        QDir directory(runDirectoryPath);
+        if (!directory.removeRecursively()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("Could not delete run directory: %1").arg(runDirectoryPath);
+            }
+            return false;
+        }
+
+        if (deletedRunCount != nullptr) {
+            ++(*deletedRunCount);
+        }
+    }
+
+    return true;
+}
+
 bool RunService::loadNodeOutputObject(
     const domain::NodeRunRecord& nodeRun,
     QJsonObject& object,

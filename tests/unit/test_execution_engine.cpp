@@ -57,6 +57,24 @@ vws::domain::Edge makeEdge(const QString& id, const QString& from, const QString
     return edge;
 }
 
+void setIoDimension(vws::domain::Node& node, int inputDimension, int outputDimension)
+{
+    node.ioSpec.inputs.clear();
+    node.ioSpec.outputs.clear();
+    if (!node.inputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec input;
+        input.portName = "input";
+        input.dimension = inputDimension;
+        node.ioSpec.inputs.append(input);
+    }
+    if (!node.outputPorts.isEmpty()) {
+        vws::domain::PortDimensionSpec output;
+        output.portName = "output";
+        output.dimension = outputDimension;
+        node.ioSpec.outputs.append(output);
+    }
+}
+
 struct EngineFixture {
     vws::application::WorkflowService workflowService;
     vws::workers::WorkerRegistry registry;
@@ -199,6 +217,35 @@ int main(int argc, char* argv[])
     if (const auto result = expect(joinInput.at(0).toObject().value("branch").toString() == "b"
             && joinInput.at(1).toObject().value("branch").toString() == "c",
             "Merged input should be a list of upstream outputs in workflow edge order")) {
+        return result;
+    }
+
+    vws::domain::Workflow slotWorkflow;
+    slotWorkflow.workflowId = "slot-workflow";
+    slotWorkflow.workspaceId = "workspace";
+    slotWorkflow.nodes = {
+        makeNode("slot-starter", "starter"),
+        makeNode("slot-target"),
+    };
+    setIoDimension(slotWorkflow.nodes[0], 1, 3);
+    setIoDimension(slotWorkflow.nodes[1], 3, 1);
+    slotWorkflow.nodes[0].config.insert("mock_output", QJsonArray{"first", "second", "third"});
+    auto slotEdge = makeEdge("edge-slot", "slot-starter", "slot-target");
+    slotEdge.fromSlot = 1;
+    slotEdge.toSlot = 2;
+    slotWorkflow.edges = {slotEdge};
+    const auto slotRun = fixture.engine.runWorkflow(slotWorkflow);
+    if (const auto result = expect(slotRun.success, "Slot-level workflow should execute successfully")) {
+        return result;
+    }
+    const auto slotInput = slotRun.nodeResults.value("slot-target").outputs.value("inputs").toObject().value("input").toArray();
+    if (const auto result = expect(slotInput.size() == 3, "Slot-level input should be assembled as an array up to toSlot")) {
+        return result;
+    }
+    if (const auto result = expect(slotInput.at(0).isNull()
+            && slotInput.at(1).isNull()
+            && slotInput.at(2).toString() == "second",
+            "output[1] should be delivered to input[2] with earlier slots null")) {
         return result;
     }
 

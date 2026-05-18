@@ -1,14 +1,25 @@
 #include "execution/ExecutionOutputRouter.h"
 
+#include <QJsonArray>
 #include <QJsonValue>
 
 namespace vws::execution {
 
 namespace {
 
-QJsonValue extractOutputValue(const QJsonObject& outputs, const QString& fromPort)
+QJsonValue extractOutputValue(const QJsonObject& outputs, const QString& fromPort, int fromSlot)
 {
-    return outputs.contains(fromPort) ? outputs.value(fromPort) : QJsonValue(outputs);
+    const auto portValue = outputs.contains(fromPort) ? outputs.value(fromPort) : QJsonValue(outputs);
+    if (fromSlot < 0) {
+        return portValue;
+    }
+
+    if (portValue.isArray()) {
+        const auto array = portValue.toArray();
+        return fromSlot < array.size() ? array.at(fromSlot) : QJsonValue();
+    }
+
+    return fromSlot == 0 ? portValue : QJsonValue();
 }
 
 } // namespace
@@ -25,9 +36,11 @@ RoutedNodeOutputs ExecutionOutputRouter::route(
             edge.edgeId,
             edge.fromNode,
             edge.fromPort,
+            edge.fromSlot,
             edge.toNode,
             edge.toPort,
-            extractOutputValue(nodeResult.outputs, edge.fromPort),
+            edge.toSlot,
+            extractOutputValue(nodeResult.outputs, edge.fromPort, edge.fromSlot),
             nodeResult.artifacts,
         });
         routed.downstreamNodeIds.append(edge.toNode);

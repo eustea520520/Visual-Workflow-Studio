@@ -7,6 +7,7 @@
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QTreeWidget>
@@ -182,6 +183,23 @@ bool WorkspaceExplorer::eventFilter(QObject* watched, QEvent* event)
 
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::RightButton) {
+            auto* item = m_tree->itemAt(mouseEvent->pos());
+            if (item != nullptr && item->parent() == m_workflowsItem) {
+                const auto workflowId = item->data(0, Qt::UserRole).toString();
+                if (!workflowId.trimmed().isEmpty()) {
+                    m_tree->setCurrentItem(item);
+                    QMenu menu(this);
+                    auto* deleteAction = menu.addAction(tr("Delete Workflow"));
+                    const auto* selectedAction = menu.exec(m_tree->viewport()->mapToGlobal(mouseEvent->pos()));
+                    if (selectedAction == deleteAction) {
+                        emit workflowDeleteRequested(workflowId, item->text(0).remove(QStringLiteral("* ")));
+                    }
+                    return true;
+                }
+            }
+        }
+
         if (mouseEvent->button() == Qt::LeftButton) {
             m_dragStartPosition = mouseEvent->pos();
         }

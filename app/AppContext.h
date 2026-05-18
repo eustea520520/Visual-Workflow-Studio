@@ -6,8 +6,21 @@
 namespace vws::application {
 class NodeTemplateService;
 class RunService;
+class WorkflowAutoLayout;
+class WorkflowGenerationAssembler;
+class WorkflowGenerationNormalizer;
+class WorkflowGenerationPromptBuilder;
+class WorkflowGenerationService;
+class WorkflowGenerationTemplateCatalog;
+class WorkflowGenerationValidator;
+class WorkflowNodeImplementationValidator;
+class WorkflowSkeletonValidator;
 class WorkflowService;
 class WorkspaceService;
+}
+
+namespace vws::infrastructure {
+class LlmChatClient;
 }
 
 namespace vws::execution {
@@ -25,6 +38,8 @@ class NodeTemplateController;
 class PythonEnvironmentController;
 class RunController;
 class WorkspaceBrowserController;
+class WorkflowGenerationController;
+class WorkflowIoController;
 class WorkflowController;
 class WorkspaceController;
 }
@@ -55,6 +70,8 @@ public:
     presentation::NodeTemplateController& nodeTemplateController();
     presentation::RunController& runController();
     presentation::WorkspaceBrowserController& workspaceBrowserController();
+    presentation::WorkflowIoController& workflowIoController();
+    presentation::WorkflowGenerationController& workflowGenerationController();
 
 private:
     void setPythonExecutable(const QString& pythonExecutable);
@@ -67,6 +84,16 @@ private:
     std::unique_ptr<application::WorkflowService> m_workflowService;
     std::unique_ptr<application::NodeTemplateService> m_nodeTemplateService;
     std::unique_ptr<application::RunService> m_runService;
+    std::unique_ptr<application::WorkflowAutoLayout> m_workflowAutoLayout;
+    std::unique_ptr<application::WorkflowGenerationTemplateCatalog> m_workflowGenerationTemplateCatalog;
+    std::unique_ptr<application::WorkflowGenerationPromptBuilder> m_workflowGenerationPromptBuilder;
+    std::unique_ptr<application::WorkflowGenerationValidator> m_workflowGenerationValidator;
+    std::unique_ptr<application::WorkflowSkeletonValidator> m_workflowSkeletonValidator;
+    std::unique_ptr<application::WorkflowNodeImplementationValidator> m_workflowNodeImplementationValidator;
+    std::unique_ptr<application::WorkflowGenerationAssembler> m_workflowGenerationAssembler;
+    std::unique_ptr<application::WorkflowGenerationNormalizer> m_workflowGenerationNormalizer;
+    std::unique_ptr<application::WorkflowGenerationService> m_workflowGenerationService;
+    std::unique_ptr<infrastructure::LlmChatClient> m_llmChatClient;
     std::shared_ptr<workers::PythonNodeWorker> m_pythonWorker;
     std::unique_ptr<presentation::AppStore> m_appStore;
     std::unique_ptr<presentation::WorkspaceController> m_workspaceController;
@@ -75,6 +102,8 @@ private:
     std::unique_ptr<presentation::NodeTemplateController> m_nodeTemplateController;
     std::unique_ptr<presentation::RunController> m_runController;
     std::unique_ptr<presentation::WorkspaceBrowserController> m_workspaceBrowserController;
+    std::unique_ptr<presentation::WorkflowIoController> m_workflowIoController;
+    std::unique_ptr<presentation::WorkflowGenerationController> m_workflowGenerationController;
 };
 
 } // namespace vws

@@ -20,6 +20,21 @@ public:
     static QString templateKey(DataTransferTemplate transferTemplate);
     static DataTransferTemplate transferTemplateFromKey(const QString& key, DataTransferTemplate fallback);
     static QString codeForTemplate(DataTransferTemplate transferTemplate);
+    static bool isFileOutputTemplate(DataTransferTemplate transferTemplate);
+    static QString defaultOutputFileName();
+    static QString outputFileNameFromCode(const QString& code);
+    static QString codeWithOutputFileName(const QString& code, const QString& fileName);
+    static bool tryApplyOutputFileName(const QString& code, const QString& fileName, QString* updatedCode, QString* errorMessage = nullptr);
+    static bool tryApplyAgentSettings(
+        const QString& code,
+        const QString& url,
+        const QString& model,
+        const QString& apiKey,
+        int maxRetries,
+        const QString& backgroundPrompt,
+        const QString& taskPrompt,
+        QString* updatedCode,
+        QString* errorMessage = nullptr);
 
     static QString starterEmptyOutputCode();
     static QString starterDataOutputCode();

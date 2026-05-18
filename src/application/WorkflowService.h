@@ -47,6 +47,7 @@ public:
 
     QString workflowPath(const QString& workspaceRootPath, const domain::Workflow& workflow) const;
     bool saveWorkflowToWorkspace(const QString& workspaceRootPath, const domain::Workflow& workflow, QString* errorMessage = nullptr) const;
+    bool deleteWorkflowFromWorkspace(const QString& workspaceRootPath, const QString& workflowId, QString* errorMessage = nullptr) const;
     bool loadWorkflowFromWorkspace(const QString& workspaceRootPath, const QString& workflowId, domain::Workflow& workflow, QString* errorMessage = nullptr) const;
     QList<domain::Workflow> listWorkflows(const QString& workspaceRootPath, QString* errorMessage = nullptr) const;
 };

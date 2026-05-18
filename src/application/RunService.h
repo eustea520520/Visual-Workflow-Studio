@@ -44,6 +44,12 @@ public:
         domain::RunRecord& record,
         QString* errorMessage = nullptr) const;
 
+    bool deleteRunsForWorkflow(
+        const QString& workspaceRootPath,
+        const QString& workflowId,
+        int* deletedRunCount = nullptr,
+        QString* errorMessage = nullptr) const;
+
     bool loadNodeOutputObject(
         const domain::NodeRunRecord& nodeRun,
         QJsonObject& object,
