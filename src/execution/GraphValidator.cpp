@@ -1,5 +1,8 @@
 #include "execution/GraphValidator.h"
 
+#include "domain/NodeTypes.h"
+#include "domain/NodeConfigKeys.h"
+
 #include <QHash>
 #include <QSet>
 
@@ -64,6 +67,27 @@ bool containsPort(const QStringList& ports, const QString& port)
     return !port.isEmpty() && ports.contains(port);
 }
 
+bool isStarterNode(const domain::Node& node)
+{
+    return node.type.trimmed().toLower() == domain::NodeTypes::Starter;
+}
+
+bool isZeroInputSubsystemNode(const domain::Node& node)
+{
+    return node.type.trimmed().toLower() == domain::NodeTypes::Subsystem
+        && node.inputPorts.isEmpty();
+}
+
+bool isTopLevelEntryNode(const domain::Node& node)
+{
+    return isStarterNode(node) || isZeroInputSubsystemNode(node);
+}
+
+bool isLoopNode(const domain::Node& node)
+{
+    return node.type.trimmed().toLower() == domain::NodeTypes::Loop;
+}
+
 int portDimension(const QList<domain::PortDimensionSpec>& specs, const QString& portName)
 {
     for (const auto& spec : specs) {
@@ -97,23 +121,26 @@ void GraphValidationResult::addWarning(const QString& warning)
     warnings.append(warning);
 }
 
-GraphValidationResult GraphValidator::validate(const domain::Workflow& workflow) const
+GraphValidationResult GraphValidator::validate(const domain::Workflow& workflow, GraphValidationMode mode) const
 {
     GraphValidationResult result;
-    validateNodes(workflow, result);
+    validateNodes(workflow, mode, result);
     validateEdges(workflow, result);
 
     if (result.valid) {
         validateAcyclic(workflow, result);
     }
     if (result.valid) {
-        validateStarterReachability(workflow, result);
+        validateLoopNodes(workflow, result);
+    }
+    if (result.valid) {
+        validateStarterReachability(workflow, mode, result);
     }
 
     return result;
 }
 
-void GraphValidator::validateNodes(const domain::Workflow& workflow, GraphValidationResult& result) const
+void GraphValidator::validateNodes(const domain::Workflow& workflow, GraphValidationMode mode, GraphValidationResult& result) const
 {
     if (workflow.nodes.isEmpty()) {
         result.addError("Workflow must contain at least one node.");
@@ -121,7 +148,7 @@ void GraphValidator::validateNodes(const domain::Workflow& workflow, GraphValida
     }
 
     QSet<QString> seenNodeIds;
-    bool hasStarter = false;
+    bool hasTopLevelEntry = false;
     for (const auto& node : workflow.nodes) {
         if (node.nodeId.isEmpty()) {
             result.addError("Node id must not be empty.");
@@ -133,19 +160,76 @@ void GraphValidator::validateNodes(const domain::Workflow& workflow, GraphValida
         }
         seenNodeIds.insert(node.nodeId);
 
-        if (node.type == "starter") {
-            hasStarter = true;
+        if (isTopLevelEntryNode(node)) {
+            hasTopLevelEntry = true;
+        }
+
+        if (isStarterNode(node)) {
             if (!node.inputPorts.isEmpty()) {
                 result.addError(QString("Starter node %1 must not define input ports.").arg(node.nodeId));
             }
             if (!containsPort(node.outputPorts, "output")) {
                 result.addError(QString("Starter node %1 must define an output port named output.").arg(node.nodeId));
             }
+        } else if (isLoopNode(node)) {
+            if (!containsPort(node.inputPorts, "input")) {
+                result.addError(QString("Loop node %1 must define an input port named input.").arg(node.nodeId));
+            }
+            if (!containsPort(node.outputPorts, "output")) {
+                result.addError(QString("Loop node %1 must define an output port named output.").arg(node.nodeId));
+            }
+            if (!node.config.contains(domain::NodeConfigKeys::LoopIterations)
+                || node.config.value(domain::NodeConfigKeys::LoopIterations).toInt(0) < 1) {
+                result.addError(QString("Loop node %1 must define a positive loop_iterations.").arg(node.nodeId));
+            }
         }
     }
 
-    if (!hasStarter) {
-        result.addError("Workflow must contain at least one Starter node.");
+    if (mode == GraphValidationMode::TopLevelWorkflow && !hasTopLevelEntry) {
+        result.addError("Workflow must contain at least one Starter node or a zero-input Subsystem node.");
+    }
+}
+
+void GraphValidator::validateLoopNodes(const domain::Workflow& workflow, GraphValidationResult& result) const
+{
+    const auto nodeIndex = buildNodeIndex(workflow);
+    QHash<QString, QList<domain::Edge>> outgoing;
+    QHash<QString, QList<domain::Edge>> incoming;
+    for (const auto& edge : workflow.edges) {
+        outgoing[edge.fromNode].append(edge);
+        incoming[edge.toNode].append(edge);
+    }
+
+    for (const auto& node : workflow.nodes) {
+        if (!isLoopNode(node)) {
+            continue;
+        }
+
+        const auto loopOutgoing = outgoing.value(node.nodeId);
+        QSet<QString> bodyNodeIds;
+        for (const auto& edge : loopOutgoing) {
+            bodyNodeIds.insert(edge.toNode);
+        }
+        if (bodyNodeIds.size() != 1) {
+            result.addError(QString("Loop node %1 must connect to exactly one direct body node.").arg(node.nodeId));
+            continue;
+        }
+
+        const auto bodyNodeId = *bodyNodeIds.constBegin();
+        const auto* bodyNode = nodeIndex.value(bodyNodeId, nullptr);
+        if (bodyNode == nullptr) {
+            continue;
+        }
+        if (isLoopNode(*bodyNode)) {
+            result.addError(QString("Loop node %1 cannot use another Loop node as its direct body node.").arg(node.nodeId));
+        }
+
+        for (const auto& edge : incoming.value(bodyNodeId)) {
+            if (edge.fromNode != node.nodeId) {
+                result.addError(QString("Loop body node %1 cannot receive input from node %2; it must only receive input from Loop node %3.")
+                    .arg(bodyNodeId, edge.fromNode, node.nodeId));
+            }
+        }
     }
 }
 
@@ -155,8 +239,6 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
     const auto nodeIndex = buildNodeIndex(workflow);
     QSet<QString> seenEdgeIds;
     QHash<QString, QStringList> targetSlotWriters;
-    QHash<QString, bool> targetPortHasWholeEdge;
-    QHash<QString, bool> targetPortHasSlotEdge;
 
     for (const auto& edge : workflow.edges) {
         if (edge.edgeId.isEmpty()) {
@@ -173,8 +255,8 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
         } else if (!containsPort(fromNode->outputPorts, edge.fromPort)) {
             result.addError(QString("Edge %1 references invalid output port %2 on node %3")
                 .arg(edge.edgeId, edge.fromPort, edge.fromNode));
-        } else if (edge.fromSlot < -1) {
-            result.addError(QString("Edge %1 from_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.fromSlot < 0) {
+            result.addError(QString("Edge %1 from_slot must be 0 or greater.").arg(edge.edgeId));
         } else if (edge.fromSlot >= outputPortDimension(*fromNode, edge.fromPort)) {
             result.addError(QString("Edge %1 references output slot %2 on node %3, but output port %4 has dimension %5.")
                 .arg(edge.edgeId)
@@ -190,8 +272,8 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
         } else if (!containsPort(toNode->inputPorts, edge.toPort)) {
             result.addError(QString("Edge %1 references invalid input port %2 on node %3")
                 .arg(edge.edgeId, edge.toPort, edge.toNode));
-        } else if (edge.toSlot < -1) {
-            result.addError(QString("Edge %1 to_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.toSlot < 0) {
+            result.addError(QString("Edge %1 to_slot must be 0 or greater.").arg(edge.edgeId));
         } else if (edge.toSlot >= inputPortDimension(*toNode, edge.toPort)) {
             result.addError(QString("Edge %1 references input slot %2 on node %3, but input port %4 has dimension %5.")
                 .arg(edge.edgeId)
@@ -200,13 +282,9 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
                 .arg(inputPortDimension(*toNode, edge.toPort)));
         }
 
-        const auto targetPortKey = QStringLiteral("%1:%2").arg(edge.toNode, edge.toPort);
         if (edge.toSlot >= 0) {
-            targetPortHasSlotEdge.insert(targetPortKey, true);
             const auto targetSlotKey = QStringLiteral("%1:%2:%3").arg(edge.toNode, edge.toPort).arg(edge.toSlot);
             targetSlotWriters[targetSlotKey].append(edge.edgeId);
-        } else {
-            targetPortHasWholeEdge.insert(targetPortKey, true);
         }
     }
 
@@ -214,12 +292,6 @@ void GraphValidator::validateEdges(const domain::Workflow& workflow, GraphValida
         if (it.value().size() > 1) {
             result.addError(QString("Input slot %1 is written by multiple edges: %2.")
                 .arg(it.key(), it.value().join(", ")));
-        }
-    }
-
-    for (auto it = targetPortHasSlotEdge.cbegin(); it != targetPortHasSlotEdge.cend(); ++it) {
-        if (it.value() && targetPortHasWholeEdge.value(it.key())) {
-            result.addError(QString("Input port %1 mixes whole-port and slot-level edges.").arg(it.key()));
         }
     }
 }
@@ -238,8 +310,12 @@ void GraphValidator::validateAcyclic(const domain::Workflow& workflow, GraphVali
     }
 }
 
-void GraphValidator::validateStarterReachability(const domain::Workflow& workflow, GraphValidationResult& result) const
+void GraphValidator::validateStarterReachability(const domain::Workflow& workflow, GraphValidationMode mode, GraphValidationResult& result) const
 {
+    if (mode == GraphValidationMode::SubsystemWorkflow) {
+        return;
+    }
+
     const auto nodeIndex = buildNodeIndex(workflow);
     const auto adjacency = buildAdjacency(workflow);
 
@@ -253,13 +329,15 @@ void GraphValidator::validateStarterReachability(const domain::Workflow& workflo
 
     QStringList stack;
     for (const auto& node : workflow.nodes) {
-        if (node.type == "starter") {
+        if (isStarterNode(node)) {
             if (indegree.value(node.nodeId) != 0) {
                 result.addError(QString("Starter node %1 must not have incoming edges.").arg(node.nodeId));
             }
             stack.append(node.nodeId);
+        } else if (isZeroInputSubsystemNode(node)) {
+            stack.append(node.nodeId);
         } else if (indegree.value(node.nodeId) == 0) {
-            result.addError(QString("Node %1 has no incoming edges and is not a Starter node. Every executable path must start from a Starter node.")
+            result.addError(QString("Node %1 has no incoming edges and is not a Starter or zero-input Subsystem node. Every executable path must start from a Starter node or a zero-input Subsystem node.")
                 .arg(node.nodeId));
         }
     }

@@ -6,10 +6,13 @@
 #include <QEvent>
 #include <QFrame>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QSignalBlocker>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
@@ -20,6 +23,7 @@ namespace vws::ui {
 namespace {
 
 constexpr const char* NodeTemplateMimeType = "application/x-vws-node-template-id";
+constexpr int RawNameRole = Qt::UserRole + 1;
 
 } // namespace
 
@@ -33,6 +37,7 @@ WorkspaceExplorer::WorkspaceExplorer(QWidget* parent)
 
 void WorkspaceExplorer::render(const WorkspaceExplorerViewModel& viewModel)
 {
+    const QSignalBlocker treeSignalBlocker(m_tree);
     m_workspaceLabel->setText(viewModel.workspaceName.trimmed().isEmpty()
             ? tr("Workspace Explorer")
             : tr("Workspace: %1").arg(viewModel.workspaceName));
@@ -135,6 +140,7 @@ void WorkspaceExplorer::rebuildWorkflowCategory(const QList<WorkspaceExplorerIte
         if (!workflow.id.isEmpty()) {
             item->setData(0, Qt::UserRole, workflow.id);
         }
+        item->setData(0, RawNameRole, workflow.name);
         m_workflowsItem->addChild(item);
     }
 }
@@ -190,10 +196,28 @@ bool WorkspaceExplorer::eventFilter(QObject* watched, QEvent* event)
                 if (!workflowId.trimmed().isEmpty()) {
                     m_tree->setCurrentItem(item);
                     QMenu menu(this);
+                    auto* renameAction = menu.addAction(tr("Rename"));
+                    auto* addAsSubsystemAction = menu.addAction(tr("Add as Subsystem Node"));
+                    menu.addSeparator();
                     auto* deleteAction = menu.addAction(tr("Delete Workflow"));
                     const auto* selectedAction = menu.exec(m_tree->viewport()->mapToGlobal(mouseEvent->pos()));
-                    if (selectedAction == deleteAction) {
-                        emit workflowDeleteRequested(workflowId, item->text(0).remove(QStringLiteral("* ")));
+                    const auto workflowName = item->data(0, RawNameRole).toString();
+                    if (selectedAction == renameAction) {
+                        bool accepted = false;
+                        const auto requestedName = QInputDialog::getText(
+                            this,
+                            tr("Rename Workflow"),
+                            tr("Workflow name"),
+                            QLineEdit::Normal,
+                            workflowName,
+                            &accepted).trimmed();
+                        if (accepted) {
+                            emit workflowRenameRequested(workflowId, requestedName);
+                        }
+                    } else if (selectedAction == addAsSubsystemAction) {
+                        emit workflowAddAsSubsystemRequested(workflowId, workflowName);
+                    } else if (selectedAction == deleteAction) {
+                        emit workflowDeleteRequested(workflowId, workflowName);
                     }
                     return true;
                 }

@@ -3,6 +3,7 @@
 #include "ui/theme/ThemeManager.h"
 
 #include <QFont>
+#include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QLineF>
 #include <QPainter>
@@ -19,7 +20,14 @@ constexpr qreal NodeWidth = 188.0;
 constexpr qreal NodeHeight = 96.0;
 constexpr qreal RotatedNodeWidth = 150.0;
 constexpr qreal RotatedNodeHeight = 150.0;
-constexpr qreal GlowPadding = 10.0;
+constexpr qreal ResizePadding = 28.0;
+constexpr qreal ResizeHandleRadius = 6.0;
+constexpr qreal ResizeHandleOutset = ResizeHandleRadius;
+constexpr qreal ResizeHitRadius = 10.0;
+constexpr qreal MinNodeWidth = 120.0;
+constexpr qreal MinNodeHeight = 72.0;
+constexpr qreal MaxNodeWidth = 640.0;
+constexpr qreal MaxNodeHeight = 420.0;
 constexpr qreal SlotStep = 18.0;
 constexpr qreal SlotMargin = 18.0;
 
@@ -61,7 +69,7 @@ NodeGraphicsItem::NodeGraphicsItem(domain::Node node, QGraphicsItem* parent)
 QRectF NodeGraphicsItem::boundingRect() const
 {
     const auto size = bodySize();
-    return QRectF(-GlowPadding, -GlowPadding, size.width() + GlowPadding * 2, size.height() + GlowPadding * 2);
+    return QRectF(-ResizePadding, -ResizePadding, size.width() + ResizePadding * 2, size.height() + ResizePadding * 2);
 }
 
 void NodeGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget)
@@ -132,6 +140,7 @@ void NodeGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* 
 
     paintPortSlots(painter, true);
     paintPortSlots(painter, false);
+    paintResizeHandles(painter);
 
     painter->setPen(tm ? tm->color("node-text-id") : QColor("#6b7280"));
     painter->drawText(
@@ -260,6 +269,11 @@ QRectF NodeGraphicsItem::bodySceneRect() const
     return mapRectToScene(bodyRect());
 }
 
+bool NodeGraphicsItem::hasResizeHandleAt(const QPointF& scenePos) const
+{
+    return resizeHandleAt(mapFromScene(scenePos)) != ResizeEdge::None;
+}
+
 QVariant NodeGraphicsItem::itemChange(GraphicsItemChange change, const QVariant& value)
 {
     if (change == ItemPositionHasChanged) {
@@ -280,6 +294,68 @@ void NodeGraphicsItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event)
 {
     emit nodeDoubleClicked(node());
     QGraphicsObject::mouseDoubleClickEvent(event);
+}
+
+void NodeGraphicsItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
+{
+    const auto handle = resizeHandleAt(event->pos());
+    if (handle == ResizeEdge::Left || handle == ResizeEdge::Right) {
+        setCursor(Qt::SizeHorCursor);
+    } else if (handle == ResizeEdge::Top || handle == ResizeEdge::Bottom) {
+        setCursor(Qt::SizeVerCursor);
+    } else {
+        unsetCursor();
+    }
+    QGraphicsObject::hoverMoveEvent(event);
+}
+
+void NodeGraphicsItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event)
+{
+    unsetCursor();
+    QGraphicsObject::hoverLeaveEvent(event);
+}
+
+void NodeGraphicsItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton && isSelected()) {
+        const auto handle = resizeHandleAt(event->pos());
+        if (handle != ResizeEdge::None) {
+            m_resizing = true;
+            m_resizeEdge = handle;
+            m_resizeStartScenePos = event->scenePos();
+            m_resizeStartItemPos = pos();
+            m_resizeStartSize = rawBodySize();
+            event->accept();
+            return;
+        }
+    }
+
+    QGraphicsObject::mousePressEvent(event);
+}
+
+void NodeGraphicsItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
+{
+    if (m_resizing) {
+        resizeFromSceneDelta(event->scenePos() - m_resizeStartScenePos);
+        event->accept();
+        return;
+    }
+
+    QGraphicsObject::mouseMoveEvent(event);
+}
+
+void NodeGraphicsItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
+{
+    if (m_resizing && event->button() == Qt::LeftButton) {
+        m_resizing = false;
+        m_resizeEdge = ResizeEdge::None;
+        unsetCursor();
+        emit nodeMoved(m_node.nodeId, pos());
+        event->accept();
+        return;
+    }
+
+    QGraphicsObject::mouseReleaseEvent(event);
 }
 
 QColor NodeGraphicsItem::borderColor() const
@@ -369,7 +445,7 @@ QRectF NodeGraphicsItem::bodyRect() const
 
 QSizeF NodeGraphicsItem::bodySize() const
 {
-    auto size = bodySizeForRotation(m_node.rotationDegrees);
+    auto size = rawBodySize();
     const auto required = SlotMargin * 2 + qMax(1, maxSlotCount()) * SlotStep;
     switch (normalizedRotation(m_node.rotationDegrees)) {
     case 90:
@@ -382,6 +458,16 @@ QSizeF NodeGraphicsItem::bodySize() const
         size.rheight() = qMax(size.height(), required);
         break;
     }
+    return size;
+}
+
+QSizeF NodeGraphicsItem::rawBodySize() const
+{
+    auto size = m_node.size.isValid()
+        ? QSizeF(m_node.size.width, m_node.size.height)
+        : bodySizeForRotation(m_node.rotationDegrees);
+    size.setWidth(qBound(MinNodeWidth, size.width(), MaxNodeWidth));
+    size.setHeight(qBound(MinNodeHeight, size.height(), MaxNodeHeight));
     return size;
 }
 
@@ -479,14 +565,147 @@ void NodeGraphicsItem::paintPortSlots(QPainter* painter, bool inputSide) const
     }
 }
 
+void NodeGraphicsItem::paintResizeHandles(QPainter* painter) const
+{
+    if (!isSelected()) {
+        return;
+    }
+
+    auto* tm = ThemeManager::instance();
+    const auto color = tm ? tm->color("primary") : QColor("#2563eb");
+    const auto body = bodyRect();
+
+    painter->save();
+    QPen railPen(color, 1.5);
+    railPen.setCapStyle(Qt::RoundCap);
+    painter->setPen(railPen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawLine(QLineF(body.left(), body.top(), body.right(), body.top()));
+    painter->drawLine(QLineF(body.left(), body.bottom(), body.right(), body.bottom()));
+    painter->drawLine(QLineF(body.left(), body.top(), body.left(), body.bottom()));
+    painter->drawLine(QLineF(body.right(), body.top(), body.right(), body.bottom()));
+
+    painter->setPen(QPen(color, 1.6));
+    painter->setBrush(tm ? tm->color("node-port-fill") : QColor("#ffffff"));
+    const QList<ResizeEdge> edges = {
+        ResizeEdge::Left,
+        ResizeEdge::Right,
+        ResizeEdge::Top,
+        ResizeEdge::Bottom,
+    };
+    for (const auto edge : edges) {
+        painter->drawEllipse(resizeHandleCenter(edge), ResizeHandleRadius, ResizeHandleRadius);
+    }
+    painter->restore();
+}
+
+NodeGraphicsItem::ResizeEdge NodeGraphicsItem::resizeHandleAt(const QPointF& localPos) const
+{
+    if (!isSelected()) {
+        return ResizeEdge::None;
+    }
+
+    const auto body = bodyRect();
+    const QList<ResizeEdge> edges = {
+        ResizeEdge::Left,
+        ResizeEdge::Right,
+        ResizeEdge::Top,
+        ResizeEdge::Bottom,
+    };
+    for (const auto edge : edges) {
+        bool onHandleSide = false;
+        switch (edge) {
+        case ResizeEdge::Left:
+            onHandleSide = localPos.x() < body.left();
+            break;
+        case ResizeEdge::Right:
+            onHandleSide = localPos.x() > body.right();
+            break;
+        case ResizeEdge::Top:
+            onHandleSide = localPos.y() < body.top();
+            break;
+        case ResizeEdge::Bottom:
+            onHandleSide = localPos.y() > body.bottom();
+            break;
+        case ResizeEdge::None:
+            break;
+        }
+
+        if (onHandleSide && QLineF(localPos, resizeHandleCenter(edge)).length() <= ResizeHitRadius) {
+            return edge;
+        }
+    }
+    return ResizeEdge::None;
+}
+
+QPointF NodeGraphicsItem::resizeHandleCenter(ResizeEdge edge) const
+{
+    const auto body = bodyRect();
+    switch (edge) {
+    case ResizeEdge::Left:
+        return QPointF(body.left() - ResizeHandleOutset, body.center().y());
+    case ResizeEdge::Right:
+        return QPointF(body.right() + ResizeHandleOutset, body.center().y());
+    case ResizeEdge::Top:
+        return QPointF(body.center().x(), body.top() - ResizeHandleOutset);
+    case ResizeEdge::Bottom:
+        return QPointF(body.center().x(), body.bottom() + ResizeHandleOutset);
+    case ResizeEdge::None:
+    default:
+        return body.center();
+    }
+}
+
+void NodeGraphicsItem::resizeFromSceneDelta(const QPointF& sceneDelta)
+{
+    auto nextPos = m_resizeStartItemPos;
+    auto nextSize = m_resizeStartSize;
+
+    switch (m_resizeEdge) {
+    case ResizeEdge::Left: {
+        const auto dx = qBound(m_resizeStartSize.width() - MaxNodeWidth, sceneDelta.x(), m_resizeStartSize.width() - MinNodeWidth);
+        nextPos.setX(m_resizeStartItemPos.x() + dx);
+        nextSize.setWidth(m_resizeStartSize.width() - dx);
+        break;
+    }
+    case ResizeEdge::Right:
+        nextSize.setWidth(qBound(MinNodeWidth, m_resizeStartSize.width() + sceneDelta.x(), MaxNodeWidth));
+        break;
+    case ResizeEdge::Top: {
+        const auto dy = qBound(m_resizeStartSize.height() - MaxNodeHeight, sceneDelta.y(), m_resizeStartSize.height() - MinNodeHeight);
+        nextPos.setY(m_resizeStartItemPos.y() + dy);
+        nextSize.setHeight(m_resizeStartSize.height() - dy);
+        break;
+    }
+    case ResizeEdge::Bottom:
+        nextSize.setHeight(qBound(MinNodeHeight, m_resizeStartSize.height() + sceneDelta.y(), MaxNodeHeight));
+        break;
+    case ResizeEdge::None:
+        return;
+    }
+
+    prepareGeometryChange();
+    m_node.size.width = nextSize.width();
+    m_node.size.height = nextSize.height();
+    if (pos() != nextPos) {
+        setPos(nextPos);
+    }
+    update();
+    emit nodeMoved(m_node.nodeId, pos());
+}
+
 QRectF NodeGraphicsItem::boundingRectFor(const domain::Node& node)
 {
-    const auto size = bodySizeForRotation(node.rotationDegrees);
+    const auto size = node.size.isValid()
+        ? QSizeF(
+            qBound(MinNodeWidth, node.size.width, MaxNodeWidth),
+            qBound(MinNodeHeight, node.size.height, MaxNodeHeight))
+        : bodySizeForRotation(node.rotationDegrees);
     return QRectF(
-        -GlowPadding,
-        -GlowPadding,
-        size.width() + GlowPadding * 2,
-        size.height() + GlowPadding * 2);
+        -ResizePadding,
+        -ResizePadding,
+        size.width() + ResizePadding * 2,
+        size.height() + ResizePadding * 2);
 }
 
 QSizeF NodeGraphicsItem::bodySizeForRotation(int rotationDegrees)

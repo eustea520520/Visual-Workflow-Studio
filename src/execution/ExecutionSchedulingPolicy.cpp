@@ -6,7 +6,19 @@ namespace vws::execution {
 
 bool ExecutionSchedulingPolicy::isStarterNode(const domain::Node& node) const
 {
-    return node.type == domain::NodeTypes::Starter;
+    return node.type.trimmed().toLower() == domain::NodeTypes::Starter;
+}
+
+bool ExecutionSchedulingPolicy::isTopLevelEntryNode(const domain::Node& node) const
+{
+    if (isStarterNode(node)) {
+        return true;
+    }
+
+    // A subsystem with no external inputs is a composite source node: its
+    // embedded workflow can start from internal Starter nodes and publish
+    // outputs to the parent graph without receiving parent inputs.
+    return node.type.trimmed().toLower() == domain::NodeTypes::Subsystem && node.inputPorts.isEmpty();
 }
 
 bool ExecutionSchedulingPolicy::isTerminalStatus(NodeStatus status) const

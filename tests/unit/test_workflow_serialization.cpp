@@ -43,8 +43,8 @@ int main(int argc, char* argv[])
     if (const auto result = expect(simpleWorkflow.edges.size() == 1, "Simple workflow should contain 1 edge")) {
         return result;
     }
-    if (const auto result = expect(simpleWorkflow.edges.first().fromSlot == -1 && simpleWorkflow.edges.first().toSlot == -1,
-            "Old workflow edges without slot fields should default to -1")) {
+    if (const auto result = expect(simpleWorkflow.edges.first().fromSlot == 0 && simpleWorkflow.edges.first().toSlot == 0,
+            "Workflow edges should use slot 0 by default")) {
         return result;
     }
 
@@ -122,6 +122,22 @@ int main(int argc, char* argv[])
     rotatedNode.rotationDegrees = 450;
     if (const auto result = expect(rotatedNode.toJson().value("rotation_degrees").toInt() == 90,
             "Serialized node rotation should be normalized")) {
+        return result;
+    }
+    if (const auto result = expect(!oldJsonNode.toJson().contains("size"),
+            "Nodes without an explicit canvas size should not serialize a default size")) {
+        return result;
+    }
+
+    auto resizedNode = oldJsonNode;
+    resizedNode.size.width = 260.0;
+    resizedNode.size.height = 132.0;
+    const auto resizedNodeJson = resizedNode.toJson();
+    const auto resizedNodeRoundTrip = vws::domain::Node::fromJson(resizedNodeJson);
+    if (const auto result = expect(resizedNodeJson.value("size").toObject().value("width").toDouble() == 260.0
+            && resizedNodeRoundTrip.size.width == 260.0
+            && resizedNodeRoundTrip.size.height == 132.0,
+            "Explicit node canvas size should survive JSON roundtrip")) {
         return result;
     }
 

@@ -151,6 +151,38 @@ int main()
         return check;
     }
 
+    auto unsavedWorkflowA = store.currentWorkflowSnapshot();
+    unsavedWorkflowA.name = "Workflow A Unsaved In Memory";
+    workflowController.syncCurrentWorkflowFromView(unsavedWorkflowA);
+    if (const auto check = expect(store.workflowDocument().isDirty(),
+            "Editing workflow A in memory should dirty its document")) {
+        return check;
+    }
+
+    workflowController.createWorkflow("Workflow B");
+    const auto workflowBId = store.currentWorkflow().workflowId;
+    if (const auto check = expect(store.currentWorkflow().name == "Workflow B",
+            "Creating workflow B should switch the active document")) {
+        return check;
+    }
+    if (const auto check = expect(workflowController.loadWorkflowFromWorkspace(workflowId, &errorMessage),
+            QString("WorkflowController should reactivate open unsaved workflow A: %1").arg(errorMessage))) {
+        return check;
+    }
+    if (const auto check = expect(store.currentWorkflow().name == "Workflow A Unsaved In Memory"
+            && store.workflowDocument().isDirty(),
+            "Switching back to an already open workflow should restore its unsaved in-memory document")) {
+        return check;
+    }
+    if (const auto check = expect(workflowController.loadWorkflowFromWorkspace(workflowBId, &errorMessage),
+            QString("WorkflowController should switch back to open workflow B: %1").arg(errorMessage))) {
+        return check;
+    }
+    if (const auto check = expect(store.currentWorkflow().workflowId == workflowBId,
+            "Open workflow documents should be addressable without closing each other")) {
+        return check;
+    }
+
     vws::domain::Node templateSourceNode;
     templateSourceNode.nodeId = "node-template-source";
     templateSourceNode.name = "Reusable Node";
@@ -248,19 +280,19 @@ int main()
     targetNode.outputPorts = {"output"};
     targetNode.ioSpec.inputs.append(portSpec("input", 1, {"only"}));
     ioWorkflow.nodes = {sourceNode, targetNode};
-    vws::domain::Edge wholePortEdge;
-    wholePortEdge.edgeId = "whole-port-edge";
-    wholePortEdge.fromNode = "source";
-    wholePortEdge.fromPort = "output";
-    wholePortEdge.toNode = "target";
-    wholePortEdge.toPort = "input";
-    wholePortEdge.fromSlot = -1;
-    wholePortEdge.toSlot = -1;
-    ioWorkflow.edges = {wholePortEdge};
-    const auto wholePortSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
-    if (const auto check = expect(wholePortSpecs.value("target").inputs.first().dimension == 1
-            && wholePortSpecs.value("target").inputs.first().itemLabels == QStringList({"only"}),
-            "Whole-port edges should not expand downstream input dimensions or labels")) {
+    vws::domain::Edge slotEdge;
+    slotEdge.edgeId = "slot-edge";
+    slotEdge.fromNode = "source";
+    slotEdge.fromPort = "output";
+    slotEdge.fromSlot = 0;
+    slotEdge.toNode = "target";
+    slotEdge.toPort = "input";
+    slotEdge.toSlot = 0;
+    ioWorkflow.edges = {slotEdge};
+    const auto oneSlotSpecs = workflowIoController.visualSpecsForWorkflow(ioWorkflow);
+    if (const auto check = expect(oneSlotSpecs.value("target").inputs.first().dimension == 1
+            && oneSlotSpecs.value("target").inputs.first().itemLabels == QStringList({"only"}),
+            "Slot edges should not expand downstream input dimensions or labels")) {
         return check;
     }
 

@@ -54,6 +54,7 @@ public:
     int inputSlotCount(const QString& portName = QStringLiteral("input")) const;
     int outputSlotCount(const QString& portName = QStringLiteral("output")) const;
     QRectF bodySceneRect() const;
+    bool hasResizeHandleAt(const QPointF& scenePos) const;
 
 signals:
     void nodeMoved(const QString& nodeId, const QPointF& scenePos);
@@ -63,18 +64,36 @@ signals:
 protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
+    void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+    void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
 
 private:
+    enum class ResizeEdge {
+        None,
+        Left,
+        Right,
+        Top,
+        Bottom,
+    };
+
     QColor borderColor() const;
     QColor fillColor() const;
     QColor stateStripColor() const;
     QRectF bodyRect() const;
     QSizeF bodySize() const;
+    QSizeF rawBodySize() const;
     QPointF inputAnchorLocalPos() const;
     QPointF outputAnchorLocalPos() const;
     QPointF slotAnchorLocalPos(bool inputSide, int slotIndex) const;
     std::optional<PortSlotHit> slotAt(const QPointF& scenePos, qreal hitRadius, bool inputSide) const;
     void paintPortSlots(QPainter* painter, bool inputSide) const;
+    void paintResizeHandles(QPainter* painter) const;
+    ResizeEdge resizeHandleAt(const QPointF& localPos) const;
+    QPointF resizeHandleCenter(ResizeEdge edge) const;
+    void resizeFromSceneDelta(const QPointF& sceneDelta);
     static QRectF boundingRectFor(const domain::Node& node);
     static QSizeF bodySizeForRotation(int rotationDegrees);
     int maxSlotCount() const;
@@ -83,6 +102,11 @@ private:
     NodeVisualState m_state = NodeVisualState::Idle;
     QList<NodePortSlotViewModel> m_inputSlots;
     QList<NodePortSlotViewModel> m_outputSlots;
+    bool m_resizing = false;
+    ResizeEdge m_resizeEdge = ResizeEdge::None;
+    QPointF m_resizeStartScenePos;
+    QPointF m_resizeStartItemPos;
+    QSizeF m_resizeStartSize;
 };
 
 } // namespace vws::ui

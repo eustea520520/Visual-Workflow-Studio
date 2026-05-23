@@ -33,6 +33,8 @@ public:
     void incrementActiveTasks();
     void decrementActiveTasks();
     void recordNodeResult(const QString& nodeId, const NodeExecutionResult& nodeResult);
+    void appendDebugOutput(const QString& nodeId, const QString& text);
+    void appendDebugOutputs(const QList<NodeDebugOutput>& outputs);
     void appendError(const QString& message);
 
     void setWorkflowStatus(WorkflowStatus status);

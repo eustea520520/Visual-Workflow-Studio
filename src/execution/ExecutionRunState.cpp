@@ -92,6 +92,21 @@ void ExecutionRunState::recordNodeResult(const QString& nodeId, const NodeExecut
     m_result.nodeResults.insert(nodeId, nodeResult);
 }
 
+void ExecutionRunState::appendDebugOutput(const QString& nodeId, const QString& text)
+{
+    if (text.trimmed().isEmpty()) {
+        return;
+    }
+    m_result.debugOutputs.append(NodeDebugOutput{nodeId, text});
+}
+
+void ExecutionRunState::appendDebugOutputs(const QList<NodeDebugOutput>& outputs)
+{
+    for (const auto& output : outputs) {
+        appendDebugOutput(output.nodeId, output.text);
+    }
+}
+
 void ExecutionRunState::appendError(const QString& message)
 {
     m_result.errors.append(message);

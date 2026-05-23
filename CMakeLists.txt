@@ -70,6 +70,10 @@ set(APPLICATION_SOURCES
     src/application/io/NodeIoSpecUtils.h src/application/io/NodeIoSpecUtils.cpp
     src/application/io/PythonIoDimensionAnalyzer.h src/application/io/PythonIoDimensionAnalyzer.cpp
     src/application/io/NodeIoSpecValidator.h src/application/io/NodeIoSpecValidator.cpp
+    src/application/subsystem/SubsystemTypes.h src/application/subsystem/SubsystemTypes.cpp
+    src/application/subsystem/SubsystemBoundaryInferer.h src/application/subsystem/SubsystemBoundaryInferer.cpp
+    src/application/subsystem/SubsystemService.h src/application/subsystem/SubsystemService.cpp
+    src/application/subsystem/SubsystemIoMapper.h src/application/subsystem/SubsystemIoMapper.cpp
     src/application/generation/WorkflowGenerationTypes.h src/application/generation/WorkflowGenerationTypes.cpp
     src/application/generation/WorkflowGenerationTemplateCatalog.h src/application/generation/WorkflowGenerationTemplateCatalog.cpp
     src/application/generation/WorkflowGenerationPromptBuilder.h src/application/generation/WorkflowGenerationPromptBuilder.cpp
@@ -92,6 +96,7 @@ set(PRESENTATION_SOURCES
     src/presentation/controllers/NodeTemplateController.h src/presentation/controllers/NodeTemplateController.cpp
     src/presentation/controllers/RunController.h src/presentation/controllers/RunController.cpp
     src/presentation/controllers/WorkspaceBrowserController.h src/presentation/controllers/WorkspaceBrowserController.cpp
+    src/presentation/controllers/CanvasNavigationController.h src/presentation/controllers/CanvasNavigationController.cpp
     src/presentation/controllers/WorkflowIoController.h src/presentation/controllers/WorkflowIoController.cpp
     src/presentation/controllers/WorkflowGenerationController.h src/presentation/controllers/WorkflowGenerationController.cpp
 )
@@ -103,7 +108,9 @@ set(EXECUTION_SOURCES
     src/execution/ExecutionPlanner.h src/execution/ExecutionPlanner.cpp
     src/execution/ExecutionSchedulingPolicy.h src/execution/ExecutionSchedulingPolicy.cpp
     src/execution/WorkflowExecutionResult.h
+    src/execution/WorkflowRunOptions.h
     src/execution/GraphValidator.h src/execution/GraphValidator.cpp
+    src/execution/LoopNodeExecutor.h src/execution/LoopNodeExecutor.cpp
     src/execution/ExecutionEventBus.h src/execution/ExecutionEventBus.cpp
     src/execution/ExecutionState.h
     src/execution/DataPacket.h
@@ -135,6 +142,8 @@ set(UI_SOURCES
     src/ui/workspace/WorkspaceExplorerViewModel.h
     src/ui/workspace/WorkspaceExplorer.h src/ui/workspace/WorkspaceExplorer.cpp
     src/ui/canvas/WorkflowCanvas.h src/ui/canvas/WorkflowCanvas.cpp
+    src/ui/canvas/CanvasBreadcrumbViewModel.h
+    src/ui/canvas/CanvasHeader.h src/ui/canvas/CanvasHeader.cpp
     src/ui/canvas/WorkflowCanvasContextMenu.h src/ui/canvas/WorkflowCanvasContextMenu.cpp
     src/ui/canvas/WorkflowCanvasInteractionController.h src/ui/canvas/WorkflowCanvasInteractionController.cpp
     src/ui/canvas/WorkflowSceneController.h src/ui/canvas/WorkflowSceneController.cpp
@@ -250,6 +259,10 @@ vws_add_test(workflow_document
     tests/unit/test_workflow_document.cpp
 )
 
+vws_add_test(subsystem_service
+    tests/unit/test_subsystem_service.cpp
+)
+
 vws_add_test(node_factory
     tests/unit/test_node_factory.cpp
 )
@@ -359,6 +372,7 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
             theme_manager
             main_window_layout_builder
             run_service
+            subsystem_service
             python_editor
             node_io_spec
             python_io_dimension_analyzer

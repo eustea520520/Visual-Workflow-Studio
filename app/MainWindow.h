@@ -3,6 +3,7 @@
 #include "domain/RunRecord.h"
 #include "domain/Workflow.h"
 #include "domain/Workspace.h"
+#include "application/WorkflowHistory.h"
 
 #include <QAction>
 #include <QHash>
@@ -23,6 +24,7 @@ class AppStore;
 
 namespace ui {
 class CommandBar;
+class CanvasHeader;
 class NodeInspector;
 class OutputPanel;
 class ThemeManager;
@@ -38,9 +40,14 @@ public:
 private:
     void buildActions();
     void buildLayout();
+    void cacheCurrentWorkflowViewState();
     void renderCurrentWorkflowOnCanvas();
+    void renderWorkflowOnCanvas(const domain::Workflow& workflow, const application::WorkflowHistory& history);
     void clearCanvasWorkflowView();
     void updateCanvasOverlay();
+    void updateCanvasBreadcrumb();
+    void enterSubsystemNode(const domain::Node& node);
+    void navigateCanvasBreadcrumb(int depth);
     void applyInitialTheme();
     void createWorkspace();
     void openWorkspace();
@@ -50,6 +57,8 @@ private:
     void openWorkflowGenerationDialog();
     void openWorkflowById(const QString& workflowId);
     void deleteWorkflowById(const QString& workflowId, const QString& workflowName);
+    void renameWorkflowById(const QString& workflowId, const QString& workflowName);
+    void addWorkflowAsSubsystemNode(const QString& workflowId, const QString& workflowName);
     void openRunById(const QString& runId);
     void restoreRunRecordToUi(
         const domain::RunRecord& record,
@@ -63,13 +72,16 @@ private:
     void runCurrentWorkflow();
     void cancelCurrentWorkflowRun();
     void openPythonNodeEditor(const domain::Node& node);
+    void retitleSubsystemNode(const domain::Node& node);
     void addNodeFromTemplateIdAt(const QString& templateId, const QPointF& scenePos);
+    void resetInspectorView();
     void resetInspectorAndOutput();
     void applyCachedNodeStatusesForWorkflow(const QString& workflowId);
     void refreshWorkspaceExplorer();
     void applyWorkspacePythonExecutable();
     void updatePythonStatus();
     void updateSelectedNodeStatus(const domain::Node& node);
+    void configureNodeDispatchDelay();
     bool ensureWorkspaceOpen();
     bool ensureWorkflowOpen();
 
@@ -77,6 +89,7 @@ private:
     presentation::AppStore& m_store;
     ui::ThemeManager* m_themeManager = nullptr;
     ui::CommandBar* m_commandBar = nullptr;
+    ui::CanvasHeader* m_canvasHeader = nullptr;
     ui::WorkspaceExplorer* m_workspaceExplorer = nullptr;
     ui::WorkflowCanvas* m_workflowCanvas = nullptr;
     ui::NodeInspector* m_nodeInspector = nullptr;
@@ -96,6 +109,10 @@ private:
     QAction* m_runAction = nullptr;
     QAction* m_cancelRunAction = nullptr;
     QAction* m_toggleThemeAction = nullptr;
+    QAction* m_advancedDiagnosticsAction = nullptr;
+    QAction* m_animateNodeStatusAction = nullptr;
+    QAction* m_setNodeDispatchDelayAction = nullptr;
+    int m_nodeDispatchDelayMs = 50;
     bool m_renderingWorkflow = false;
 };
 

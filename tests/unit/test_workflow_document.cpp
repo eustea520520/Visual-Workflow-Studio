@@ -92,8 +92,10 @@ int main()
     }
     if (const auto check = expect(editableWorkflow.edges.size() == 1
             && editableWorkflow.edges.first().fromNode == "source"
-            && editableWorkflow.edges.first().toNode == "target",
-            "WorkflowEditService should append the created edge to the workflow")) {
+            && editableWorkflow.edges.first().toNode == "target"
+            && editableWorkflow.edges.first().fromSlot == 0
+            && editableWorkflow.edges.first().toSlot == 0,
+            "WorkflowEditService should append a slot-0 edge to the workflow")) {
         return check;
     }
 
@@ -148,10 +150,14 @@ int main()
             "WorkflowClipboard should capture selected nodes")) {
         return check;
     }
-    const auto pasted = clipboard.createPasteSubgraph(" Copy");
+    const auto pasted = clipboard.createPasteSubgraph();
     if (const auto check = expect(pasted.nodes.size() == 1
             && pasted.nodes.first().nodeId != editableWorkflow.nodes.first().nodeId,
             "WorkflowClipboard should create a pasted subgraph with fresh node ids")) {
+        return check;
+    }
+    if (const auto check = expect(pasted.nodes.first().name == editableWorkflow.nodes.first().name,
+            "WorkflowClipboard should not append a copy suffix to pasted node titles by default")) {
         return check;
     }
 

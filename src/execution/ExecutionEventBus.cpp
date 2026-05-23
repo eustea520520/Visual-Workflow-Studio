@@ -17,6 +17,11 @@ void ExecutionEventBus::publishNodeStatusChanged(const QString& runId, const QSt
     emit nodeStatusChanged(runId, nodeId, nodeStatusToString(status));
 }
 
+void ExecutionEventBus::publishNodeStatusText(const QString& runId, const QString& nodeId, const QString& status)
+{
+    emit nodeStatusChanged(runId, nodeId, status);
+}
+
 void ExecutionEventBus::publishNodeOutputReady(const QString& runId, const QString& nodeId, const QJsonObject& outputs)
 {
     emit nodeOutputReady(runId, nodeId, outputs);

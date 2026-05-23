@@ -1,5 +1,6 @@
 #include "ui/main/MainWindowLayoutBuilder.h"
 
+#include "ui/canvas/CanvasHeader.h"
 #include "ui/canvas/WorkflowCanvas.h"
 #include "ui/inspector/NodeInspector.h"
 #include "ui/output/OutputPanel.h"
@@ -42,6 +43,7 @@ int main(int argc, char* argv[])
     QAction saveTemplate(&owner);
     QAction connectNodes(&owner);
     QAction importTemplate(&owner);
+    QAction generateWorkflowByLlm(&owner);
     QAction runWorkflow(&owner);
     QAction cancelRun(&owner);
     QAction toggleTheme(&owner);
@@ -55,6 +57,7 @@ int main(int argc, char* argv[])
         &saveTemplate,
         &connectNodes,
         &importTemplate,
+        &generateWorkflowByLlm,
         &runWorkflow,
         &cancelRun,
         &toggleTheme,
@@ -75,6 +78,9 @@ int main(int argc, char* argv[])
     if (const auto check = expect(layout.workflowCanvas != nullptr, "Layout builder should create workflow canvas")) {
         return check;
     }
+    if (const auto check = expect(layout.canvasHeader != nullptr, "Layout builder should create canvas header")) {
+        return check;
+    }
     if (const auto check = expect(layout.nodeInspector != nullptr, "Layout builder should create node inspector")) {
         return check;
     }
@@ -91,6 +97,10 @@ int main(int argc, char* argv[])
     }
     if (const auto check = expect(owner.findChild<QWidget*>("canvasHost") != nullptr,
             "Canvas host should exist outside the scene")) {
+        return check;
+    }
+    if (const auto check = expect(owner.findChild<vws::ui::CanvasHeader*>("canvasHeader") == layout.canvasHeader,
+            "CanvasHeader should be discoverable above the canvas")) {
         return check;
     }
     if (const auto check = expect(owner.findChild<vws::ui::CommandBar*>("CommandBar") == layout.commandBar,

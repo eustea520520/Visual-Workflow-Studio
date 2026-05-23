@@ -8,6 +8,7 @@ namespace vws::execution {
 class ExecutionSchedulingPolicy {
 public:
     bool isStarterNode(const domain::Node& node) const;
+    bool isTopLevelEntryNode(const domain::Node& node) const;
     bool isTerminalStatus(NodeStatus status) const;
     bool canStillBeScheduled(NodeStatus status) const;
 };

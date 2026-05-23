@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Workflow.h"
+#include "execution/GraphValidator.h"
 #include "execution/GraphIndexes.h"
 
 #include <QStringList>
@@ -17,7 +18,9 @@ struct ExecutionPlan {
 // Validates a workflow and prepares immutable graph indexes for one execution run.
 class ExecutionPlanner final {
 public:
-    ExecutionPlan plan(const domain::Workflow& workflow) const;
+    ExecutionPlan plan(
+        const domain::Workflow& workflow,
+        GraphValidationMode mode = GraphValidationMode::TopLevelWorkflow) const;
 };
 
 } // namespace vws::execution

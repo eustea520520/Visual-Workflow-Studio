@@ -4,6 +4,7 @@
 #include "execution/ExecutionCancellationState.h"
 #include "execution/ExecutionEventBus.h"
 #include "execution/WorkflowExecutionResult.h"
+#include "execution/WorkflowRunOptions.h"
 
 #include <QObject>
 #include <QThreadPool>
@@ -30,8 +31,22 @@ public:
         const QString& workspacePath = QString(),
         const QString& runPath = QString(),
         const QString& artifactPath = QString());
+    WorkflowExecutionResult runWorkflow(
+        const domain::Workflow& workflow,
+        const WorkflowRunOptions& options,
+        const QString& workspacePath = QString(),
+        const QString& runPath = QString(),
+        const QString& artifactPath = QString());
     void runWorkflowAsync(
         const domain::Workflow& workflow,
+        const QString& workspacePath,
+        const QString& runPath,
+        const QString& artifactPath,
+        QObject* receiver,
+        std::function<void(WorkflowExecutionResult)> onFinished);
+    void runWorkflowAsync(
+        const domain::Workflow& workflow,
+        const WorkflowRunOptions& options,
         const QString& workspacePath,
         const QString& runPath,
         const QString& artifactPath,

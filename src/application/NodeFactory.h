@@ -29,6 +29,10 @@ public:
         const QPointF& scenePos,
         qsizetype existingNodeCount,
         DataTransferTemplate templateKind = DataTransferTemplate::DataToData);
+    static domain::Node createLoopNode(
+        const QPointF& scenePos,
+        qsizetype existingNodeCount,
+        int iterations);
 };
 
 } // namespace vws::application

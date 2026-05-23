@@ -38,18 +38,18 @@ QList<domain::Artifact> artifactsFromJson(
 QJsonObject PythonWorkerProtocol::buildRequest(const execution::NodeExecutionRequest& request)
 {
     const domain::NodeConfigView config(request.nodeConfig);
+    auto context = request.context;
+    context.insert("run_id", request.runId);
+    context.insert("node_id", request.nodeId);
+    context.insert("workspace_path", request.workspacePath);
+    context.insert("run_path", QDir::toNativeSeparators(request.runPath));
+    context.insert("artifact_path", QDir::toNativeSeparators(request.artifactPath));
     return {
         {"request_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {"code", config.code()},
         {"entry", config.entry()},
         {"inputs", request.inputs},
-        {"context", QJsonObject{
-            {"run_id", request.runId},
-            {"node_id", request.nodeId},
-            {"workspace_path", request.workspacePath},
-            {"run_path", QDir::toNativeSeparators(request.runPath)},
-            {"artifact_path", QDir::toNativeSeparators(request.artifactPath)},
-        }},
+        {"context", context},
     };
 }
 
@@ -76,6 +76,7 @@ PythonWorkerParseResult PythonWorkerProtocol::parseResponse(
     result.nodeId = request.nodeId;
     result.success = response.value("success").toBool(false);
     result.outputs = response.value("outputs").toObject();
+    result.metadata = response.value("metadata").toObject();
     result.artifacts = artifactsFromJson(response.value("artifacts").toArray(), request.runId, request.nodeId);
     result.stdoutText = response.value("stdout").toString();
     result.stderrText = response.value("stderr").toString();

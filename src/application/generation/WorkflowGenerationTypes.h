@@ -51,6 +51,7 @@ struct WorkflowSkeletonNode {
     QString outputContract;
     int expectedInputDimension = 1;
     int expectedOutputDimension = 1;
+    int loopIterations = 0;
     QStringList inputItems;
     QStringList outputItems;
     QStringList dependsOnNodeIds;
@@ -65,10 +66,10 @@ struct WorkflowSkeletonEdge {
     QString edgeId;
     QString fromNode;
     QString fromPort;
-    int fromSlot = -1;
+    int fromSlot = 0;
     QString toNode;
     QString toPort;
-    int toSlot = -1;
+    int toSlot = 0;
 
     QJsonObject toJson() const;
     static WorkflowSkeletonEdge fromJson(const QJsonObject& object);

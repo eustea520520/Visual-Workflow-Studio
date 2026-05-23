@@ -6,6 +6,7 @@
 namespace vws::application {
 class NodeTemplateService;
 class RunService;
+class SubsystemService;
 class WorkflowAutoLayout;
 class WorkflowGenerationAssembler;
 class WorkflowGenerationNormalizer;
@@ -38,6 +39,7 @@ class NodeTemplateController;
 class PythonEnvironmentController;
 class RunController;
 class WorkspaceBrowserController;
+class CanvasNavigationController;
 class WorkflowGenerationController;
 class WorkflowIoController;
 class WorkflowController;
@@ -70,8 +72,10 @@ public:
     presentation::NodeTemplateController& nodeTemplateController();
     presentation::RunController& runController();
     presentation::WorkspaceBrowserController& workspaceBrowserController();
+    presentation::CanvasNavigationController& canvasNavigationController();
     presentation::WorkflowIoController& workflowIoController();
     presentation::WorkflowGenerationController& workflowGenerationController();
+    application::SubsystemService& subsystemService();
 
 private:
     void setPythonExecutable(const QString& pythonExecutable);
@@ -84,6 +88,7 @@ private:
     std::unique_ptr<application::WorkflowService> m_workflowService;
     std::unique_ptr<application::NodeTemplateService> m_nodeTemplateService;
     std::unique_ptr<application::RunService> m_runService;
+    std::unique_ptr<application::SubsystemService> m_subsystemService;
     std::unique_ptr<application::WorkflowAutoLayout> m_workflowAutoLayout;
     std::unique_ptr<application::WorkflowGenerationTemplateCatalog> m_workflowGenerationTemplateCatalog;
     std::unique_ptr<application::WorkflowGenerationPromptBuilder> m_workflowGenerationPromptBuilder;
@@ -102,6 +107,7 @@ private:
     std::unique_ptr<presentation::NodeTemplateController> m_nodeTemplateController;
     std::unique_ptr<presentation::RunController> m_runController;
     std::unique_ptr<presentation::WorkspaceBrowserController> m_workspaceBrowserController;
+    std::unique_ptr<presentation::CanvasNavigationController> m_canvasNavigationController;
     std::unique_ptr<presentation::WorkflowIoController> m_workflowIoController;
     std::unique_ptr<presentation::WorkflowGenerationController> m_workflowGenerationController;
 };

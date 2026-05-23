@@ -31,6 +31,22 @@ bool hasCycleFrom(const QString& nodeId, const QHash<QString, QStringList>& adja
     visited.insert(nodeId);
     return false;
 }
+
+bool isZeroInputSubsystemNode(const WorkflowSkeletonNode& node)
+{
+    return node.type == domain::NodeTypes::Subsystem && node.expectedInputDimension == 0;
+}
+
+bool isLoopNode(const WorkflowSkeletonNode& node)
+{
+    return node.type == domain::NodeTypes::Loop;
+}
+
+bool isValidSourcePort(const WorkflowSkeletonNode& node, const QString& port)
+{
+    Q_UNUSED(node);
+    return port == QStringLiteral("output");
+}
 } // namespace
 
 bool WorkflowSkeletonValidator::validateJsonText(
@@ -69,7 +85,7 @@ bool WorkflowSkeletonValidator::validate(
     QSet<QString> nodeIds;
     QSet<QString> edgeIds;
     QHash<QString, const WorkflowSkeletonNode*> nodesById;
-    bool hasStarter = false;
+    bool hasTopLevelEntry = false;
 
     for (const auto& node : skeleton.nodes) {
         if (!idPattern.match(node.nodeId).hasMatch()) {
@@ -90,12 +106,34 @@ bool WorkflowSkeletonValidator::validate(
         }
 
         if (node.type == domain::NodeTypes::Starter) {
-            hasStarter = true;
+            hasTopLevelEntry = true;
             if (!node.dependsOnNodeIds.isEmpty()) {
                 errors.append(QStringLiteral("Starter node %1 must not depend on other nodes.").arg(node.nodeId));
             }
             if (node.expectedInputDimension != 0) {
                 errors.append(QStringLiteral("Starter node %1 expected_input_dimension must be 0.").arg(node.nodeId));
+            }
+        } else if (node.type == domain::NodeTypes::Subsystem) {
+            if (node.expectedInputDimension < 0 || node.expectedInputDimension > 12) {
+                errors.append(QStringLiteral("Subsystem node %1 expected_input_dimension must be between 0 and 12.").arg(node.nodeId));
+            }
+            if (isZeroInputSubsystemNode(node)) {
+                hasTopLevelEntry = true;
+                if (!node.dependsOnNodeIds.isEmpty()) {
+                    errors.append(QStringLiteral("Zero-input subsystem node %1 must not depend on other nodes.").arg(node.nodeId));
+                }
+            } else if (node.dependsOnNodeIds.isEmpty()) {
+                errors.append(QStringLiteral("Subsystem node %1 must define dependencies unless it has expected_input_dimension=0.").arg(node.nodeId));
+            }
+        } else if (node.type == domain::NodeTypes::Loop) {
+            if (node.dependsOnNodeIds.isEmpty()) {
+                errors.append(QStringLiteral("Loop node %1 must define dependencies.").arg(node.nodeId));
+            }
+            if (node.expectedInputDimension < 1 || node.expectedInputDimension > 12) {
+                errors.append(QStringLiteral("Loop node %1 expected_input_dimension must be between 1 and 12.").arg(node.nodeId));
+            }
+            if (node.loopIterations < 1) {
+                errors.append(QStringLiteral("Loop node %1 loop_iterations must be a positive integer.").arg(node.nodeId));
             }
         } else if (node.dependsOnNodeIds.isEmpty()) {
             errors.append(QStringLiteral("Non-starter node %1 must define dependencies.").arg(node.nodeId));
@@ -118,15 +156,13 @@ bool WorkflowSkeletonValidator::validate(
         }
     }
 
-    if (!hasStarter) {
-        errors.append(QStringLiteral("Skeleton must contain at least one starter node."));
+    if (!hasTopLevelEntry) {
+        errors.append(QStringLiteral("Skeleton must contain at least one starter node or zero-input subsystem node."));
     }
 
     QHash<QString, QStringList> adjacency;
     QHash<QString, int> indegree;
     QHash<QString, QStringList> targetSlotWriters;
-    QHash<QString, bool> targetPortHasWholeEdge;
-    QHash<QString, bool> targetPortHasSlotEdge;
     for (const auto& node : skeleton.nodes) {
         adjacency.insert(node.nodeId, {});
         indegree.insert(node.nodeId, 0);
@@ -147,27 +183,27 @@ bool WorkflowSkeletonValidator::validate(
         if (!nodeIds.contains(edge.toNode)) {
             errors.append(QStringLiteral("Edge %1 references missing to_node %2").arg(edge.edgeId, edge.toNode));
         }
-        if (edge.fromPort != "output" || edge.toPort != "input") {
-            errors.append(QStringLiteral("Edge %1 must use output -> input ports.").arg(edge.edgeId));
+        const auto* fromNode = nodesById.value(edge.fromNode, nullptr);
+        const auto* toNode = nodesById.value(edge.toNode, nullptr);
+        if (fromNode != nullptr && !isValidSourcePort(*fromNode, edge.fromPort)) {
+            errors.append(QStringLiteral("Edge %1 uses invalid source port %2 for node %3.")
+                .arg(edge.edgeId, edge.fromPort, edge.fromNode));
         }
-        if (edge.fromSlot < -1 || edge.toSlot < -1) {
-            errors.append(QStringLiteral("Edge %1 from_slot/to_slot must be -1 or greater.").arg(edge.edgeId));
+        if (edge.toPort != "input") {
+            errors.append(QStringLiteral("Edge %1 must target input port.").arg(edge.edgeId));
         }
-        if (const auto* fromNode = nodesById.value(edge.fromNode, nullptr);
-            fromNode != nullptr && edge.fromSlot >= fromNode->expectedOutputDimension) {
+        if (edge.fromSlot < 0 || edge.toSlot < 0) {
+            errors.append(QStringLiteral("Edge %1 from_slot/to_slot must be 0 or greater.").arg(edge.edgeId));
+        }
+        if (fromNode != nullptr && edge.fromSlot >= fromNode->expectedOutputDimension) {
             errors.append(QStringLiteral("Edge %1 from_slot is outside source output dimension.").arg(edge.edgeId));
         }
-        if (const auto* toNode = nodesById.value(edge.toNode, nullptr);
-            toNode != nullptr && edge.toSlot >= toNode->expectedInputDimension) {
+        if (toNode != nullptr && edge.toSlot >= toNode->expectedInputDimension) {
             errors.append(QStringLiteral("Edge %1 to_slot is outside target input dimension.").arg(edge.edgeId));
         }
 
-        const auto targetPortKey = QStringLiteral("%1:%2").arg(edge.toNode, edge.toPort);
         if (edge.toSlot >= 0) {
-            targetPortHasSlotEdge.insert(targetPortKey, true);
             targetSlotWriters[QStringLiteral("%1:%2:%3").arg(edge.toNode, edge.toPort).arg(edge.toSlot)].append(edge.edgeId);
-        } else {
-            targetPortHasWholeEdge.insert(targetPortKey, true);
         }
 
         adjacency[edge.fromNode].append(edge.toNode);
@@ -180,11 +216,6 @@ bool WorkflowSkeletonValidator::validate(
                 .arg(it.key(), it.value().join(", ")));
         }
     }
-    for (auto it = targetPortHasSlotEdge.cbegin(); it != targetPortHasSlotEdge.cend(); ++it) {
-        if (it.value() && targetPortHasWholeEdge.value(it.key())) {
-            errors.append(QStringLiteral("Input port %1 mixes whole-port and slot-level edges.").arg(it.key()));
-        }
-    }
 
     for (const auto& node : skeleton.nodes) {
         for (const auto& dependency : node.dependsOnNodeIds) {
@@ -192,8 +223,31 @@ bool WorkflowSkeletonValidator::validate(
                 errors.append(QStringLiteral("Node %1 depends on missing node %2").arg(node.nodeId, dependency));
             }
         }
-        if (node.type != domain::NodeTypes::Starter && indegree.value(node.nodeId) == 0) {
+        if (node.type != domain::NodeTypes::Starter && !isZeroInputSubsystemNode(node)
+            && indegree.value(node.nodeId) == 0) {
             errors.append(QStringLiteral("Node %1 has no incoming edge.").arg(node.nodeId));
+        }
+    }
+
+    for (const auto& loopNode : skeleton.nodes) {
+        if (!isLoopNode(loopNode)) {
+            continue;
+        }
+        const auto bodyNodes = adjacency.value(loopNode.nodeId);
+        if (bodyNodes.size() != 1) {
+            errors.append(QStringLiteral("Loop node %1 must connect to exactly one direct body node.").arg(loopNode.nodeId));
+            continue;
+        }
+        const auto bodyNodeId = bodyNodes.first();
+        const auto* bodyNode = nodesById.value(bodyNodeId, nullptr);
+        if (bodyNode != nullptr && isLoopNode(*bodyNode)) {
+            errors.append(QStringLiteral("Loop node %1 cannot use another Loop node as its direct body node.").arg(loopNode.nodeId));
+        }
+        for (const auto& edge : skeleton.edges) {
+            if (edge.toNode == bodyNodeId && edge.fromNode != loopNode.nodeId) {
+                errors.append(QStringLiteral("Loop body node %1 cannot receive input from node %2.")
+                    .arg(bodyNodeId, edge.fromNode));
+            }
         }
     }
 
@@ -210,6 +264,8 @@ bool WorkflowSkeletonValidator::validate(
     for (const auto& node : skeleton.nodes) {
         if (node.type == domain::NodeTypes::Starter) {
             stack.append(node.nodeId);
+        } else if (isZeroInputSubsystemNode(node)) {
+            stack.append(node.nodeId);
         }
     }
     QSet<QString> reachable;
@@ -225,7 +281,7 @@ bool WorkflowSkeletonValidator::validate(
     }
     for (const auto& node : skeleton.nodes) {
         if (!reachable.contains(node.nodeId)) {
-            errors.append(QStringLiteral("Node %1 is not reachable from a starter node.").arg(node.nodeId));
+            errors.append(QStringLiteral("Node %1 is not reachable from a starter or zero-input subsystem node.").arg(node.nodeId));
         }
     }
 

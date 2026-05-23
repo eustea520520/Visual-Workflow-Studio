@@ -27,6 +27,8 @@ public:
 signals:
     void workflowActivated(const QString& workflowId);
     void workflowDeleteRequested(const QString& workflowId, const QString& workflowName);
+    void workflowRenameRequested(const QString& workflowId, const QString& workflowName);
+    void workflowAddAsSubsystemRequested(const QString& workflowId, const QString& workflowName);
     void runActivated(const QString& runId);
 
 protected:

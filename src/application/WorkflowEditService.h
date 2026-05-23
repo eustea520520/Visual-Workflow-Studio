@@ -33,7 +33,7 @@ public:
     static domain::Workflow duplicateSubgraph(
         const domain::Workflow& sourceSubgraph,
         qreal offset,
-        const QString& copiedNameSuffix = QStringLiteral(" Copy"));
+        const QString& copiedNameSuffix = QString());
     static void appendSubgraph(domain::Workflow& workflow, const domain::Workflow& subgraph);
 };
 

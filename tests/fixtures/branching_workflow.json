@@ -122,29 +122,37 @@
       "edge_id": "edge-a-b",
       "from_node": "node-a",
       "from_port": "output",
+      "from_slot": 0,
       "to_node": "node-b",
-      "to_port": "input"
+      "to_port": "input",
+      "to_slot": 0
     },
     {
       "edge_id": "edge-a-c",
       "from_node": "node-a",
       "from_port": "output",
+      "from_slot": 0,
       "to_node": "node-c",
-      "to_port": "input"
+      "to_port": "input",
+      "to_slot": 0
     },
     {
       "edge_id": "edge-b-d",
       "from_node": "node-b",
       "from_port": "output",
+      "from_slot": 0,
       "to_node": "node-d",
-      "to_port": "left"
+      "to_port": "left",
+      "to_slot": 0
     },
     {
       "edge_id": "edge-c-d",
       "from_node": "node-c",
       "from_port": "output",
+      "from_slot": 0,
       "to_node": "node-d",
-      "to_port": "right"
+      "to_port": "right",
+      "to_slot": 0
     }
   ],
   "created_at": "2026-05-07T00:00:00Z",

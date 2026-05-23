@@ -16,4 +16,10 @@ inline const QString AgentMaxRetries = QStringLiteral("agent_max_retries");
 inline const QString AgentBackgroundPrompt = QStringLiteral("agent_background_prompt");
 inline const QString AgentTaskPrompt = QStringLiteral("agent_task_prompt");
 
+inline const QString SubsystemWorkflow = QStringLiteral("subsystem_workflow");
+inline const QString SubsystemBoundary = QStringLiteral("subsystem_boundary");
+inline const QString SubsystemSchemaVersion = QStringLiteral("subsystem_schema_version");
+
+inline const QString LoopIterations = QStringLiteral("loop_iterations");
+
 } // namespace vws::domain::NodeConfigKeys

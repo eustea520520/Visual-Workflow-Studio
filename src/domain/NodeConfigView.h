@@ -64,6 +64,11 @@ public:
         return m_config.value(NodeConfigKeys::AgentTaskPrompt).toString(fallback);
     }
 
+    int loopIterations(int fallback = 0) const
+    {
+        return m_config.value(NodeConfigKeys::LoopIterations).toInt(fallback);
+    }
+
 private:
     const QJsonObject& m_config;
 };

@@ -15,6 +15,7 @@ struct NodeExecutionResult {
     QString nodeId;
     bool success = false;
     QJsonObject outputs;
+    QJsonObject metadata;
     QList<domain::Artifact> artifacts;
     QString stdoutText;
     QString stderrText;

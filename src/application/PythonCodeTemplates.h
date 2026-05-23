@@ -43,6 +43,7 @@ public:
     static QString functionDataToFileCode();
     static QString functionFileToDataCode();
     static QString functionFileToFileCode();
+    static QString loopCode();
 
     static QString defaultFunctionCode();
     static QString defaultStarterCode();

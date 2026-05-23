@@ -51,7 +51,7 @@ QString validSkeletonJson()
     }
   ],
   "edges": [
-    {"edge_id": "edge_data_to_csv", "from_node": "starter_data", "from_port": "output", "to_node": "write_csv", "to_port": "input"}
+    {"edge_id": "edge_data_to_csv", "from_node": "starter_data", "from_port": "output", "from_slot": 0, "to_node": "write_csv", "to_port": "input", "to_slot": 0}
   ]
 })");
 }
@@ -68,6 +68,10 @@ int main(int argc, char* argv[])
     if (const auto check = expect(catalog.contains("agent_file_to_file"), "Template catalog should expose agent_file_to_file")) {
         return check;
     }
+    if (const auto check = expect(catalog.contains("loop"),
+            "Template catalog should expose single loop template")) {
+        return check;
+    }
 
     vws::application::WorkflowSkeleton skeleton;
     QStringList errors;
@@ -82,7 +86,7 @@ int main(int argc, char* argv[])
     const auto starterSpec = catalog.fullSpec("starter_data_output").value();
     const auto starterJson = QStringLiteral(R"({
   "node_id": "starter_data",
-  "code": "# vws:output output dimension=1 labels=1\ndef run(inputs, context):\n    return {\"outputs\": {\"output\": {\"a\": 1, \"b\": 2}}, \"artifacts\": []}",
+  "code": "# vws:output output dimension=1 labels=1\ndef run(inputs, context):\n    return {\"outputs\": {\"output\": [{\"a\": 1, \"b\": 2}]}, \"artifacts\": []}",
   "config_patch": {"language": "python", "entry": "run"},
   "timeout_ms": 300000,
   "notes": "Create values."
@@ -98,7 +102,7 @@ int main(int argc, char* argv[])
     const auto fileSpec = catalog.fullSpec("data_to_file").value();
     const auto fileJson = QStringLiteral(R"({
   "node_id": "write_csv",
-  "code": "# vws:input input dimension=1 labels=1\n# vws:output output dimension=1 labels=1\nfrom pathlib import Path\nimport csv\n\ndef run(inputs, context):\n    input_data = inputs.get(\"input\", {})\n    artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n    artifact_dir.mkdir(parents=True, exist_ok=True)\n    output_file_path = \"output.csv\"\n    output_path = artifact_dir / output_file_path\n    with output_path.open(\"w\", encoding=\"utf-8\", newline=\"\") as f:\n        writer = csv.DictWriter(f, fieldnames=[\"a\", \"b\"])\n        writer.writeheader()\n        writer.writerow(input_data)\n    return {\"outputs\": {\"output\": {\"file_path\": str(output_path), \"format\": output_path.suffix.lstrip(\".\"), \"size_bytes\": output_path.stat().st_size}}, \"artifacts\": [{\"type\": output_path.suffix.lstrip(\".\"), \"path\": str(output_path), \"metadata\": {\"size_bytes\": output_path.stat().st_size}}]}",
+  "code": "# vws:input input dimension=1 labels=1\n# vws:output output dimension=1 labels=1\nfrom pathlib import Path\nimport csv\n\ndef run(inputs, context):\n    input_data = inputs.get(\"input\", [])\n    row = input_data[0] if input_data else {}\n    artifact_dir = Path(context.get(\"artifact_path\") or context.get(\"run_path\") or \".\")\n    artifact_dir.mkdir(parents=True, exist_ok=True)\n    output_file_path = \"output.csv\"\n    output_path = artifact_dir / output_file_path\n    with output_path.open(\"w\", encoding=\"utf-8\", newline=\"\") as f:\n        writer = csv.DictWriter(f, fieldnames=[\"a\", \"b\"])\n        writer.writeheader()\n        writer.writerow(row)\n    return {\"outputs\": {\"output\": [{\"file_path\": str(output_path), \"format\": output_path.suffix.lstrip(\".\"), \"size_bytes\": output_path.stat().st_size}]}, \"artifacts\": [{\"type\": output_path.suffix.lstrip(\".\"), \"path\": str(output_path), \"metadata\": {\"size_bytes\": output_path.stat().st_size}}]}",
   "config_patch": {"language": "python", "entry": "run"},
   "timeout_ms": 300000,
   "notes": "Write CSV."

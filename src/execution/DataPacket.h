@@ -14,10 +14,10 @@ struct DataPacket {
     QString edgeId;
     QString fromNodeId;
     QString fromPort;
-    int fromSlot = -1;
+    int fromSlot = 0;
     QString toNodeId;
     QString toPort;
-    int toSlot = -1;
+    int toSlot = 0;
     QJsonValue value;
     QList<domain::Artifact> artifacts;
 };

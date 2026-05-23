@@ -56,17 +56,127 @@ void AppStore::setCurrentWorkflow(
     const domain::Workflow& workflow,
     application::WorkflowDocument::ChangeState state)
 {
+    cacheCurrentWorkflowDocument();
     m_state.workflowDocument.replace(workflow, state);
+    cacheCurrentWorkflowDocument();
 }
 
 void AppStore::updateCurrentWorkflowFromView(const domain::Workflow& workflow)
 {
     m_state.workflowDocument.replaceFromView(workflow);
+    cacheCurrentWorkflowDocument();
 }
 
 void AppStore::clearCurrentWorkflow()
 {
+    cacheCurrentWorkflowDocument();
     m_state.workflowDocument.clear();
+}
+
+void AppStore::cacheCurrentWorkflowDocument()
+{
+    if (!m_state.workflowDocument.hasWorkflow()) {
+        return;
+    }
+
+    const auto workflowId = m_state.workflowDocument.workflow().workflowId.trimmed();
+    if (!workflowId.isEmpty()) {
+        m_state.openWorkflowDocumentsById.insert(workflowId, m_state.workflowDocument);
+    }
+}
+
+bool AppStore::hasOpenWorkflowDocument(const QString& workflowId) const
+{
+    return m_state.openWorkflowDocumentsById.contains(workflowId.trimmed());
+}
+
+bool AppStore::openWorkflowSnapshot(const QString& workflowId, domain::Workflow* workflow) const
+{
+    const auto normalizedWorkflowId = workflowId.trimmed();
+    if (normalizedWorkflowId.isEmpty() || workflow == nullptr) {
+        return false;
+    }
+
+    if (m_state.workflowDocument.hasWorkflow()
+        && m_state.workflowDocument.workflow().workflowId == normalizedWorkflowId) {
+        *workflow = m_state.workflowDocument.snapshot();
+        return true;
+    }
+
+    const auto it = m_state.openWorkflowDocumentsById.constFind(normalizedWorkflowId);
+    if (it == m_state.openWorkflowDocumentsById.constEnd()) {
+        return false;
+    }
+
+    *workflow = it.value().snapshot();
+    return true;
+}
+
+void AppStore::replaceOpenWorkflowDocument(
+    const domain::Workflow& workflow,
+    application::WorkflowDocument::ChangeState state)
+{
+    const auto workflowId = workflow.workflowId.trimmed();
+    if (workflowId.isEmpty()) {
+        return;
+    }
+
+    application::WorkflowDocument document;
+    document.replace(workflow, state);
+    m_state.openWorkflowDocumentsById.insert(workflowId, document);
+    if (m_state.workflowDocument.hasWorkflow()
+        && m_state.workflowDocument.workflow().workflowId == workflowId) {
+        m_state.workflowDocument = document;
+    }
+}
+
+bool AppStore::activateOpenWorkflowDocument(const QString& workflowId)
+{
+    const auto normalizedWorkflowId = workflowId.trimmed();
+    if (normalizedWorkflowId.isEmpty() || !m_state.openWorkflowDocumentsById.contains(normalizedWorkflowId)) {
+        return false;
+    }
+
+    cacheCurrentWorkflowDocument();
+    m_state.workflowDocument = m_state.openWorkflowDocumentsById.value(normalizedWorkflowId);
+    return true;
+}
+
+void AppStore::removeOpenWorkflowDocument(const QString& workflowId)
+{
+    m_state.openWorkflowDocumentsById.remove(workflowId.trimmed());
+}
+
+void AppStore::markCurrentWorkflowSaved()
+{
+    m_state.workflowDocument.markSaved();
+    cacheCurrentWorkflowDocument();
+}
+
+void AppStore::cacheWorkflowHistory(const QString& workflowId, const application::WorkflowHistory& history)
+{
+    const auto normalizedWorkflowId = workflowId.trimmed();
+    if (!normalizedWorkflowId.isEmpty()) {
+        m_state.workflowHistoriesById.insert(normalizedWorkflowId, history);
+    }
+}
+
+bool AppStore::workflowHistory(const QString& workflowId, application::WorkflowHistory* history) const
+{
+    const auto normalizedWorkflowId = workflowId.trimmed();
+    if (normalizedWorkflowId.isEmpty() || !m_state.workflowHistoriesById.contains(normalizedWorkflowId)) {
+        return false;
+    }
+
+    if (history != nullptr) {
+        *history = m_state.workflowHistoriesById.value(normalizedWorkflowId);
+    }
+    return true;
+}
+
+void AppStore::removeWorkflowHistory(const QString& workflowId)
+{
+    m_state.workflowHistoriesById.remove(workflowId.trimmed());
 }
 
 bool& AppStore::workflowRunning()
@@ -208,6 +318,8 @@ void AppStore::resetForWorkspaceChange()
 {
     clearCurrentWorkflow();
     resetForWorkflowChange();
+    m_state.openWorkflowDocumentsById.clear();
+    m_state.workflowHistoriesById.clear();
     m_state.nodeStatusesByWorkflowId.clear();
     m_state.workflowIdByRunId.clear();
     m_state.runningWorkflowIds.clear();

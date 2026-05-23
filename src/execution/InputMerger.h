@@ -14,7 +14,8 @@ public:
     QJsonObject buildInputs(
         const QString& nodeId,
         const GraphIndexes& indexes,
-        const QHash<QString, DataPacket>& completedEdgeData) const;
+        const QHash<QString, DataPacket>& completedEdgeData,
+        const QHash<QString, QJsonObject>& initialInputsByNodeId = {}) const;
 };
 
 } // namespace vws::execution

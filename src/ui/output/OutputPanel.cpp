@@ -57,6 +57,21 @@ void OutputPanel::render(const OutputPanelViewModel& viewModel)
     m_nodeNames = viewModel.nodeNamesById;
 }
 
+void OutputPanel::setAdvancedDiagnosticsEnabled(bool enabled)
+{
+    if (m_advancedDiagnosticsEnabled == enabled) {
+        return;
+    }
+
+    m_advancedDiagnosticsEnabled = enabled;
+    updateAdvancedTabs();
+}
+
+bool OutputPanel::advancedDiagnosticsEnabled() const
+{
+    return m_advancedDiagnosticsEnabled;
+}
+
 void OutputPanel::clearRun()
 {
     m_timelineTable->setRowCount(0);
@@ -72,11 +87,19 @@ void OutputPanel::clearRun()
 
 void OutputPanel::recordWorkflowStatus(const QString& runId, const QString& status)
 {
+    if (!m_advancedDiagnosticsEnabled) {
+        return;
+    }
+
     appendTimelineRow(runId, tr("Workflow"), displayWorkflowName(runId), status);
 }
 
 void OutputPanel::recordNodeStatus(const QString& runId, const QString& nodeId, const QString& status)
 {
+    if (!m_advancedDiagnosticsEnabled) {
+        return;
+    }
+
     appendTimelineRow(runId, tr("Node"), displayNodeName(nodeId), status);
 
     const auto row = ensureNodeRunRow(nodeId);
@@ -86,6 +109,10 @@ void OutputPanel::recordNodeStatus(const QString& runId, const QString& nodeId, 
 
 void OutputPanel::recordNodeOutput(const QString& runId, const QString& nodeId, const QJsonObject& outputs)
 {
+    if (!m_advancedDiagnosticsEnabled) {
+        return;
+    }
+
     appendTimelineRow(runId, tr("Node Output"), displayNodeName(nodeId), tr("Output ready"));
 
     const auto row = ensureNodeRunRow(nodeId);
@@ -94,11 +121,13 @@ void OutputPanel::recordNodeOutput(const QString& runId, const QString& nodeId, 
 
 void OutputPanel::recordNodeError(const QString& runId, const QString& nodeId, const QString& message)
 {
-    appendTimelineRow(runId, tr("Node Error"), displayNodeName(nodeId), message);
+    if (m_advancedDiagnosticsEnabled) {
+        appendTimelineRow(runId, tr("Node Error"), displayNodeName(nodeId), message);
 
-    const auto row = ensureNodeRunRow(nodeId);
-    setCell(m_nodeRunTable, row, 1, tr("Failed"));
-    setCell(m_nodeRunTable, row, 5, message);
+        const auto row = ensureNodeRunRow(nodeId);
+        setCell(m_nodeRunTable, row, 1, tr("Failed"));
+        setCell(m_nodeRunTable, row, 5, message);
+    }
     appendStderr(QString("[%1] %2").arg(displayNodeName(nodeId), message));
 }
 
@@ -109,7 +138,7 @@ void OutputPanel::recordThreadTrace(
     const QString& threadId,
     const QString& threadName)
 {
-    if (m_threadTraceTable == nullptr) {
+    if (!m_advancedDiagnosticsEnabled || m_threadTraceTable == nullptr) {
         return;
     }
 
@@ -126,23 +155,26 @@ void OutputPanel::recordThreadTrace(
 
 void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& result)
 {
-    for (auto it = result.nodeStatuses.cbegin(); it != result.nodeStatuses.cend(); ++it) {
-        const auto row = ensureNodeRunRow(it.key());
-        setCell(m_nodeRunTable, row, 1, it.value());
+    if (m_advancedDiagnosticsEnabled) {
+        for (auto it = result.nodeStatuses.cbegin(); it != result.nodeStatuses.cend(); ++it) {
+            const auto row = ensureNodeRunRow(it.key());
+            setCell(m_nodeRunTable, row, 1, it.value());
+        }
     }
 
     QList<domain::Artifact> artifacts;
     for (auto it = result.nodeResults.cbegin(); it != result.nodeResults.cend(); ++it) {
         const auto& nodeId = it.key();
         const auto& nodeResult = it.value();
-        const auto row = ensureNodeRunRow(nodeId);
-
-        setCell(m_nodeRunTable, row, 3, nodeResult.stdoutText.left(300));
-        setCell(m_nodeRunTable, row, 4, compactJson(nodeResult.outputs));
-        setCell(m_nodeRunTable, row, 5, nodeResult.errorMessage);
+        if (m_advancedDiagnosticsEnabled) {
+            const auto row = ensureNodeRunRow(nodeId);
+            setCell(m_nodeRunTable, row, 3, nodeResult.stdoutText.left(300));
+            setCell(m_nodeRunTable, row, 4, compactJson(nodeResult.outputs));
+            setCell(m_nodeRunTable, row, 5, nodeResult.errorMessage);
+        }
 
         const auto nodeDisplayName = displayNodeName(nodeId);
-        if (!nodeResult.stdoutText.trimmed().isEmpty()) {
+        if (result.debugOutputs.isEmpty() && !nodeResult.stdoutText.trimmed().isEmpty()) {
             appendDebugOutput(QString("[%1]\n%2").arg(nodeDisplayName, nodeResult.stdoutText));
         }
         if (!nodeResult.stderrText.trimmed().isEmpty()) {
@@ -154,7 +186,16 @@ void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& 
         artifacts.append(nodeResult.artifacts);
     }
 
-    showArtifacts(artifacts);
+    for (const auto& debugOutput : result.debugOutputs) {
+        if (!debugOutput.text.trimmed().isEmpty()) {
+            appendDebugOutput(QString("[%1]\n%2")
+                .arg(displayNodeName(debugOutput.nodeId), debugOutput.text));
+        }
+    }
+
+    if (m_advancedDiagnosticsEnabled) {
+        showArtifacts(artifacts);
+    }
 }
 
 void OutputPanel::showRunRecord(
@@ -163,8 +204,11 @@ void OutputPanel::showRunRecord(
 {
     Q_UNUSED(nodeOutputsByNodeId);
 
-    appendTimelineRow(record.id, tr("Workflow"), displayWorkflowName(record.id), record.status);
+    if (!m_advancedDiagnosticsEnabled) {
+        return;
+    }
 
+    appendTimelineRow(record.id, tr("Workflow"), displayWorkflowName(record.id), record.status);
     for (const auto& nodeRun : record.nodeRuns) {
         const auto row = ensureNodeRunRow(nodeRun.nodeId);
         setCell(m_nodeRunTable, row, 1, nodeRun.status);
@@ -203,6 +247,9 @@ void OutputPanel::appendStdout(const QString& text)
 void OutputPanel::appendDebugOutput(const QString& text)
 {
     if (m_debugOutputView != nullptr && !text.isEmpty()) {
+        if (!m_debugOutputView->toPlainText().trimmed().isEmpty()) {
+            m_debugOutputView->appendPlainText(QString());
+        }
         m_debugOutputView->appendPlainText(text);
     }
 }
@@ -223,6 +270,10 @@ void OutputPanel::appendTraceback(const QString& text)
 
 void OutputPanel::showArtifacts(const QList<domain::Artifact>& artifacts)
 {
+    if (!m_advancedDiagnosticsEnabled) {
+        return;
+    }
+
     m_artifactTable->setRowCount(0);
     for (const auto& artifact : artifacts) {
         const auto row = m_artifactTable->rowCount();
@@ -362,22 +413,64 @@ void OutputPanel::buildUi()
     m_artifactTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     setupTable(m_artifactTable);
 
-    auto* tabs = new QTabWidget(this);
-    tabs->setObjectName(QStringLiteral("outputTabs"));
-    tabs->addTab(m_timelineTable, tr("Run Timeline"));
-    tabs->addTab(m_nodeRunTable, tr("Node Runs"));
-    tabs->addTab(m_threadTraceTable, tr("Thread Trace"));
-    tabs->addTab(m_stdoutView, tr("Logs"));
-    tabs->addTab(m_debugOutputView, tr("Debug Output"));
-    tabs->addTab(m_stderrView, tr("stderr"));
-    tabs->addTab(m_tracebackView, tr("Traceback"));
-    tabs->addTab(m_artifactTable, tr("Artifacts"));
+    m_tabs = new QTabWidget(this);
+    m_tabs->setObjectName(QStringLiteral("outputTabs"));
+    m_tabs->addTab(m_stdoutView, tr("Logs"));
+    m_tabs->addTab(m_debugOutputView, tr("Debug Output"));
+    m_tabs->addTab(m_stderrView, tr("stderr"));
+    m_tabs->addTab(m_tracebackView, tr("Traceback"));
+    updateAdvancedTabs();
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(10);
     layout->addWidget(title);
-    layout->addWidget(tabs, 1);
+    layout->addWidget(m_tabs, 1);
+}
+
+void OutputPanel::updateAdvancedTabs()
+{
+    if (m_tabs == nullptr) {
+        return;
+    }
+
+    if (m_advancedDiagnosticsEnabled) {
+        addTabIfMissing(m_timelineTable, tr("Run Timeline"), 0);
+        addTabIfMissing(m_nodeRunTable, tr("Node Runs"), 1);
+        addTabIfMissing(m_threadTraceTable, tr("Thread Trace"), 2);
+        addTabIfMissing(m_artifactTable, tr("Artifacts"));
+        return;
+    }
+
+    removeTabForWidget(m_timelineTable);
+    removeTabForWidget(m_nodeRunTable);
+    removeTabForWidget(m_threadTraceTable);
+    removeTabForWidget(m_artifactTable);
+}
+
+void OutputPanel::addTabIfMissing(QWidget* widget, const QString& title, int index)
+{
+    if (m_tabs == nullptr || widget == nullptr || m_tabs->indexOf(widget) >= 0) {
+        return;
+    }
+
+    if (index >= 0 && index <= m_tabs->count()) {
+        m_tabs->insertTab(index, widget, title);
+    } else {
+        m_tabs->addTab(widget, title);
+    }
+}
+
+void OutputPanel::removeTabForWidget(QWidget* widget)
+{
+    if (m_tabs == nullptr || widget == nullptr) {
+        return;
+    }
+
+    const auto index = m_tabs->indexOf(widget);
+    if (index >= 0) {
+        m_tabs->removeTab(index);
+    }
 }
 
 void OutputPanel::appendTimelineRow(const QString& runId, const QString& scope, const QString& itemId, const QString& status)
@@ -441,8 +534,8 @@ void OutputPanel::setCell(QTableWidget* table, int row, int column, const QStrin
     item->setToolTip(text);
     if (text.size() <= MaxAutoResizeCharacters) {
         table->resizeColumnToContents(column);
+        table->resizeRowToContents(row);
     }
-    table->resizeRowToContents(row);
 }
 
 QString OutputPanel::nowText() const

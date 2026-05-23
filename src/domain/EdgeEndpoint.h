@@ -7,7 +7,7 @@ namespace vws::domain {
 struct EdgeEndpoint {
     QString nodeId;
     QString portName;
-    int slotIndex = -1;
+    int slotIndex = 0;
 };
 
 } // namespace vws::domain

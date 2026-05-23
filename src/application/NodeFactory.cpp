@@ -120,4 +120,29 @@ domain::Node NodeFactory::createAgentNode(
     return node;
 }
 
+domain::Node NodeFactory::createLoopNode(
+    const QPointF& scenePos,
+    qsizetype existingNodeCount,
+    int iterations)
+{
+    domain::Node node;
+    node.nodeId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    node.type = NodeTypes::Loop;
+    node.name = QStringLiteral("Loop Node %1").arg(nodeOrdinal(existingNodeCount));
+    node.description = QStringLiteral("Runs the next node repeatedly with generated per-iteration input.");
+    node.position.x = scenePos.x();
+    node.position.y = scenePos.y();
+    node.inputPorts = {"input"};
+    node.outputPorts = {"output"};
+    node.config = {
+        {ConfigKeys::Language, "python"},
+        {ConfigKeys::Entry, "run"},
+        {ConfigKeys::IoTemplate, "loop"},
+        {ConfigKeys::LoopIterations, iterations},
+        {ConfigKeys::Code, PythonCodeTemplates::loopCode()},
+    };
+    node.ioSpec = NodeIoSpecUtils::defaultSpecForNode(node);
+    return node;
+}
+
 } // namespace vws::application

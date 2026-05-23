@@ -2,6 +2,7 @@
 
 #include "application/NodeTemplateService.h"
 #include "application/RunService.h"
+#include "application/subsystem/SubsystemService.h"
 #include "application/WorkflowService.h"
 #include "application/WorkspaceService.h"
 #include "application/generation/WorkflowAutoLayout.h"
@@ -20,6 +21,7 @@
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/RunController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
+#include "presentation/controllers/CanvasNavigationController.h"
 #include "presentation/controllers/WorkflowGenerationController.h"
 #include "presentation/controllers/WorkflowIoController.h"
 #include "presentation/controllers/WorkflowController.h"
@@ -46,12 +48,14 @@ void AppContext::initialize()
     m_workerRegistry->registerWorker(m_pythonWorker);
     m_workerRegistry->registerWorkerForType(NodeTypes::Starter, m_pythonWorker);
     m_workerRegistry->registerWorkerForType(NodeTypes::Agent, m_pythonWorker);
+    m_workerRegistry->registerWorkerForType(NodeTypes::Loop, m_pythonWorker);
 
     m_executionEngine = std::make_unique<execution::ExecutionEngine>(*m_workerRegistry);
     m_workspaceService = std::make_unique<application::WorkspaceService>();
     m_workflowService = std::make_unique<application::WorkflowService>();
     m_nodeTemplateService = std::make_unique<application::NodeTemplateService>();
     m_runService = std::make_unique<application::RunService>();
+    m_subsystemService = std::make_unique<application::SubsystemService>();
     m_workflowAutoLayout = std::make_unique<application::WorkflowAutoLayout>();
     m_workflowGenerationTemplateCatalog = std::make_unique<application::WorkflowGenerationTemplateCatalog>();
     m_workflowGenerationPromptBuilder = std::make_unique<application::WorkflowGenerationPromptBuilder>();
@@ -94,6 +98,8 @@ void AppContext::initialize()
         *m_nodeTemplateService,
         *m_runService,
         *m_appStore);
+    m_canvasNavigationController = std::make_unique<presentation::CanvasNavigationController>(
+        *m_subsystemService);
     m_workflowIoController = std::make_unique<presentation::WorkflowIoController>();
     m_workflowGenerationController = std::make_unique<presentation::WorkflowGenerationController>(
         *m_workflowGenerationPromptBuilder,
@@ -137,6 +143,11 @@ presentation::WorkspaceBrowserController& AppContext::workspaceBrowserController
     return *m_workspaceBrowserController;
 }
 
+presentation::CanvasNavigationController& AppContext::canvasNavigationController()
+{
+    return *m_canvasNavigationController;
+}
+
 presentation::WorkflowIoController& AppContext::workflowIoController()
 {
     return *m_workflowIoController;
@@ -145,6 +156,11 @@ presentation::WorkflowIoController& AppContext::workflowIoController()
 presentation::WorkflowGenerationController& AppContext::workflowGenerationController()
 {
     return *m_workflowGenerationController;
+}
+
+application::SubsystemService& AppContext::subsystemService()
+{
+    return *m_subsystemService;
 }
 
 void AppContext::setPythonExecutable(const QString& pythonExecutable)

@@ -47,7 +47,10 @@ domain::Workflow WorkflowGenerationNormalizer::normalize(const domain::Workflow&
         }
         seenNodeIds.insert(node.nodeId);
         node.type = node.type.trimmed().toLower();
-        if (node.type != domain::NodeTypes::Starter && node.type != domain::NodeTypes::Agent) {
+        if (node.type != domain::NodeTypes::Starter
+            && node.type != domain::NodeTypes::Agent
+            && node.type != domain::NodeTypes::Subsystem
+            && node.type != domain::NodeTypes::Loop) {
             node.type = domain::NodeTypes::Function;
         }
         node.name = node.name.trimmed().isEmpty()
@@ -57,13 +60,22 @@ domain::Workflow WorkflowGenerationNormalizer::normalize(const domain::Workflow&
         if (node.type == domain::NodeTypes::Starter) {
             node.inputPorts.clear();
             node.outputPorts = {"output"};
+        } else if (node.type == domain::NodeTypes::Loop) {
+            node.inputPorts = {"input"};
+            node.outputPorts = {"output"};
+            if (node.config.value(domain::NodeConfigKeys::LoopIterations).toInt(0) <= 0) {
+                node.config.insert(domain::NodeConfigKeys::LoopIterations, 1);
+            }
         } else {
             node.inputPorts = {"input"};
             node.outputPorts = {"output"};
         }
-        node.config.insert(domain::NodeConfigKeys::Language, QStringLiteral("python"));
-        node.config.insert(domain::NodeConfigKeys::Entry, QStringLiteral("run"));
-        if (node.config.value(domain::NodeConfigKeys::Code).toString().trimmed().isEmpty()) {
+        if (node.type != domain::NodeTypes::Subsystem) {
+            node.config.insert(domain::NodeConfigKeys::Language, QStringLiteral("python"));
+            node.config.insert(domain::NodeConfigKeys::Entry, QStringLiteral("run"));
+        }
+        if (node.type != domain::NodeTypes::Subsystem
+            && node.config.value(domain::NodeConfigKeys::Code).toString().trimmed().isEmpty()) {
             node.config.insert(domain::NodeConfigKeys::Code, PythonCodeTemplates::defaultCodeForNodeType(node.type));
         }
         if (node.runtime.timeoutMs <= 0) {
@@ -86,11 +98,11 @@ domain::Workflow WorkflowGenerationNormalizer::normalize(const domain::Workflow&
         seenEdgeIds.insert(edge.edgeId);
         edge.fromPort = QStringLiteral("output");
         edge.toPort = QStringLiteral("input");
-        if (edge.fromSlot < -1) {
-            edge.fromSlot = -1;
+        if (edge.fromSlot < 0) {
+            edge.fromSlot = 0;
         }
-        if (edge.toSlot < -1) {
-            edge.toSlot = -1;
+        if (edge.toSlot < 0) {
+            edge.toSlot = 0;
         }
     }
 

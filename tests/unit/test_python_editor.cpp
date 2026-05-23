@@ -33,16 +33,16 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
 
     const auto templateCode = vws::application::PythonCodeTemplates::defaultFunctionCode();
-    if (const auto check = expect(templateCode.contains("input_data = inputs.get(\"input\", {})"),
-            "Default Python template should show how to read the default input port")) {
+    if (const auto check = expect(templateCode.contains("input_data = inputs.get(\"input\", [])"),
+            "Default Python template should read input as a slot list")) {
         return check;
     }
     if (const auto check = expect(templateCode.contains("\"outputs\"") && templateCode.contains("\"output\""),
             "Default Python template should return outputs.output for downstream nodes")) {
         return check;
     }
-    if (const auto check = expect(vws::application::PythonCodeTemplates::starterEmptyOutputCode().contains("\"output\": {}"),
-            "Starter empty-output template should return an empty output object")) {
+    if (const auto check = expect(vws::application::PythonCodeTemplates::starterEmptyOutputCode().contains("\"output\": [{}]"),
+            "Starter empty-output template should return one slot containing an empty output object")) {
         return check;
     }
     if (const auto check = expect(vws::application::PythonCodeTemplates::defaultStarterCode().contains("output_data"),
@@ -55,6 +55,14 @@ int main(int argc, char* argv[])
     }
     if (const auto check = expect(vws::application::PythonCodeTemplates::defaultAgentCode().contains("/chat/completions"),
             "Agent template should call an OpenAI-compatible chat completion endpoint")) {
+        return check;
+    }
+    if (const auto check = expect(vws::application::PythonCodeTemplates::loopCode().contains("context.get(\"loop\", {})")
+            && vws::application::PythonCodeTemplates::loopCode().contains("iteration_count")
+            && vws::application::PythonCodeTemplates::loopCode().contains("input_data is a list of slot values")
+            && vws::application::PythonCodeTemplates::loopCode().contains("\"output\": [result]")
+            && vws::application::PythonCodeTemplates::defaultCodeForNodeType("loop").contains("VWS loop node"),
+            "Default Loop template should read iteration data from context.loop and return business output")) {
         return check;
     }
     if (const auto check = expect(vws::application::PythonCodeTemplates::agentCode(

@@ -3,12 +3,16 @@
 #include "AppContext.h"
 #include "application/NodeFactory.h"
 #include "application/PythonCodeTemplates.h"
+#include "application/WorkflowHistory.h"
+#include "application/WorkflowService.h"
+#include "application/subsystem/SubsystemService.h"
 #include "domain/NodeTemplate.h"
 #include "domain/NodeConfigView.h"
 #include "domain/NodeTypes.h"
 #include "presentation/controllers/NodeTemplateController.h"
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/RunController.h"
+#include "presentation/controllers/CanvasNavigationController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
 #include "presentation/controllers/WorkflowGenerationController.h"
 #include "presentation/controllers/WorkflowIoController.h"
@@ -17,6 +21,7 @@
 #include "presentation/models/WorkflowDisplayModel.h"
 #include "presentation/state/AppStore.h"
 #include "ui/canvas/WorkflowCanvas.h"
+#include "ui/canvas/CanvasHeader.h"
 #include "ui/editor/PythonNodeEditorDialog.h"
 #include "ui/generation/WorkflowGenerationDialog.h"
 #include "ui/inspector/NodeInspector.h"
@@ -32,9 +37,12 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHash>
 #include <QInputDialog>
 #include <QJsonDocument>
@@ -44,10 +52,14 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPalette>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QScopedValueRollback>
 #include <QStatusBar>
+#include <QStyleHints>
 #include <QTimer>
+#include <QVBoxLayout>
 
 namespace vws {
 
@@ -104,6 +116,7 @@ void MainWindow::buildActions()
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
     auto* workflowMenu = menuBar()->addMenu(tr("&Workflow"));
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
+    auto* advancedSettingsMenu = menuBar()->addMenu(tr("Advanced Settings"));
 
     m_newWorkspaceAction = fileMenu->addAction(tr("New Workspace"));
     m_openWorkspaceAction = fileMenu->addAction(tr("Open Workspace"));
@@ -125,6 +138,13 @@ void MainWindow::buildActions()
     m_cancelRunAction = workflowMenu->addAction(tr("Cancel Run"));
 
     m_toggleThemeAction = viewMenu->addAction(tr("Toggle Light / Dark Theme"));
+    m_advancedDiagnosticsAction = advancedSettingsMenu->addAction(tr("Enable Advanced Output Diagnostics"));
+    m_advancedDiagnosticsAction->setCheckable(true);
+    m_advancedDiagnosticsAction->setChecked(false);
+    m_animateNodeStatusAction = advancedSettingsMenu->addAction(tr("Animate Node Status Step by Step"));
+    m_animateNodeStatusAction->setCheckable(true);
+    m_animateNodeStatusAction->setChecked(true);
+    m_setNodeDispatchDelayAction = advancedSettingsMenu->addAction(tr("Set Node Step Delay..."));
 
     connect(m_newWorkspaceAction, &QAction::triggered, this, &MainWindow::createWorkspace);
     connect(m_openWorkspaceAction, &QAction::triggered, this, &MainWindow::openWorkspace);
@@ -139,6 +159,12 @@ void MainWindow::buildActions()
     connect(m_generateWorkflowByLlmAction, &QAction::triggered, this, &MainWindow::openWorkflowGenerationDialog);
     connect(m_runAction, &QAction::triggered, this, &MainWindow::runCurrentWorkflow);
     connect(m_cancelRunAction, &QAction::triggered, this, &MainWindow::cancelCurrentWorkflowRun);
+    connect(m_advancedDiagnosticsAction, &QAction::toggled, this, [this](bool enabled) {
+        if (m_outputPanel != nullptr) {
+            m_outputPanel->setAdvancedDiagnosticsEnabled(enabled);
+        }
+    });
+    connect(m_setNodeDispatchDelayAction, &QAction::triggered, this, &MainWindow::configureNodeDispatchDelay);
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
 }
 
@@ -165,10 +191,13 @@ void MainWindow::buildLayout()
         m_toggleThemeAction,
     });
     m_commandBar = layout.commandBar;
+    m_canvasHeader = layout.canvasHeader;
     m_workspaceExplorer = layout.workspaceExplorer;
     m_workflowCanvas = layout.workflowCanvas;
     m_nodeInspector = layout.nodeInspector;
     m_outputPanel = layout.outputPanel;
+    m_outputPanel->setAdvancedDiagnosticsEnabled(
+        m_advancedDiagnosticsAction != nullptr && m_advancedDiagnosticsAction->isChecked());
     m_canvasOverlay = layout.canvasOverlay;
     setCentralWidget(layout.centralWidget);
 
@@ -187,16 +216,35 @@ void MainWindow::buildLayout()
             m_timeoutStatusLabel->setText(tr("Timeout: -"));
         }
     });
-    connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeDoubleClicked, this, &MainWindow::openPythonNodeEditor);
+    connect(m_canvasHeader, &ui::CanvasHeader::breadcrumbClicked, this, &MainWindow::navigateCanvasBreadcrumb);
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeDoubleClicked, this, [this](const domain::Node& node) {
+        if (m_appContext.subsystemService().isSubsystemNode(node)) {
+            // Entering a subsystem rebuilds the QGraphicsScene. Defer it until
+            // the double-click event has fully returned so the clicked item is
+            // not deleted while Qt is still dispatching its mouse event.
+            QTimer::singleShot(0, this, [this, node]() {
+                enterSubsystemNode(node);
+            });
+            return;
+        }
+        openPythonNodeEditor(node);
+    });
     connect(m_workflowCanvas, &ui::WorkflowCanvas::saveRequested, this, &MainWindow::saveWorkflow);
     connect(m_workflowCanvas, &ui::WorkflowCanvas::workflowChanged, this, [this](const domain::Workflow& workflow) {
         if (m_renderingWorkflow) {
             return;
         }
-        m_appContext.workflowController().syncCurrentWorkflowFromView(workflow);
+        if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+            m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
+        } else {
+            m_appContext.workflowController().syncCurrentWorkflowFromView(workflow);
+            m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
+        }
     });
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowActivated, this, &MainWindow::openWorkflowById);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowDeleteRequested, this, &MainWindow::deleteWorkflowById);
+    connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowRenameRequested, this, &MainWindow::renameWorkflowById);
+    connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowAddAsSubsystemRequested, this, &MainWindow::addWorkflowAsSubsystemNode);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::runActivated, this, &MainWindow::openRunById);
     connect(m_canvasOverlay, &ui::EmptyStateOverlay::createWorkspaceRequested, this, &MainWindow::createWorkspace);
     connect(m_canvasOverlay, &ui::EmptyStateOverlay::openWorkspaceRequested, this, &MainWindow::openWorkspace);
@@ -223,6 +271,32 @@ void MainWindow::buildLayout()
                 m_workflowCanvas->workflow().nodes.size(),
                 toApplicationDataTransferTemplate(templateKind)));
         });
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::subsystemNodeRequested, this,
+        [this](const QPointF& scenePos) {
+            if (!ensureWorkspaceOpen() || !ensureWorkflowOpen()) {
+                return;
+            }
+            domain::NodePosition position;
+            position.x = scenePos.x();
+            position.y = scenePos.y();
+            const auto name = tr("Subsystem Node %1").arg(m_workflowCanvas->workflow().nodes.size() + 1);
+            m_workflowCanvas->addNode(m_appContext.subsystemService().createSubsystemNode(
+                m_store.currentWorkspace().id,
+                name,
+                position));
+        });
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::loopNodeRequested, this,
+        [this](const QPointF& scenePos) {
+            if (!ensureWorkspaceOpen() || !ensureWorkflowOpen()) {
+                return;
+            }
+            m_workflowCanvas->addNode(application::NodeFactory::createLoopNode(
+                scenePos,
+                m_workflowCanvas->workflow().nodes.size(),
+                1));
+        });
+    connect(m_workflowCanvas, &ui::WorkflowCanvas::subsystemNodeRetitleRequested,
+        this, &MainWindow::retitleSubsystemNode);
     connect(m_workflowCanvas, &ui::WorkflowCanvas::nodeTemplateDropped,
         this, &MainWindow::addNodeFromTemplateIdAt);
     connect(&m_appContext.runController(), &presentation::RunController::nodeStatusChanged, this,
@@ -286,7 +360,49 @@ void MainWindow::buildLayout()
 
 void MainWindow::applyInitialTheme()
 {
-    m_themeManager->applyTheme(ui::AppTheme::Light);
+    auto theme = ui::AppTheme::Light;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    if (qApp != nullptr
+        && qApp->styleHints() != nullptr
+        && qApp->styleHints()->colorScheme() == Qt::ColorScheme::Dark) {
+        theme = ui::AppTheme::Dark;
+    } else
+#endif
+    {
+        const auto windowColor = QApplication::palette().color(QPalette::Window);
+        if (windowColor.isValid() && windowColor.lightness() < 128) {
+            theme = ui::AppTheme::Dark;
+        }
+    }
+    m_themeManager->applyTheme(theme);
+}
+
+void MainWindow::cacheCurrentWorkflowViewState()
+{
+    if (m_workflowCanvas == nullptr || m_store.currentWorkflow().workflowId.trimmed().isEmpty()) {
+        return;
+    }
+
+    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+        domain::Workflow rootWorkflow;
+        QString errorMessage;
+        if (m_appContext.canvasNavigationController().flushCurrentWorkflow(
+                m_workflowCanvas->workflow(),
+                m_workflowCanvas->history(),
+                rootWorkflow,
+                &errorMessage)) {
+            m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
+        } else if (m_outputPanel != nullptr) {
+            m_outputPanel->appendStderr(errorMessage);
+        }
+    } else {
+        m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
+        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(m_workflowCanvas->workflow());
+        m_appContext.canvasNavigationController().updateCurrentHistory(m_workflowCanvas->history());
+    }
+    if (!m_appContext.canvasNavigationController().isInsideSubsystem()) {
+        m_store.cacheWorkflowHistory(m_store.currentWorkflow().workflowId, m_workflowCanvas->history());
+    }
 }
 
 void MainWindow::renderCurrentWorkflowOnCanvas()
@@ -295,10 +411,29 @@ void MainWindow::renderCurrentWorkflowOnCanvas()
         return;
     }
 
+    application::WorkflowHistory history;
+    if (m_store.workflowHistory(m_store.currentWorkflow().workflowId, &history)) {
+        // Existing per-workflow history is restored below.
+    }
+    m_appContext.canvasNavigationController().setRootWorkflow(
+        m_store.currentWorkspace(),
+        m_store.currentWorkflow(),
+        history);
+    renderWorkflowOnCanvas(m_store.currentWorkflow(), history);
+    updateCanvasBreadcrumb();
+}
+
+void MainWindow::renderWorkflowOnCanvas(const domain::Workflow& workflow, const application::WorkflowHistory& history)
+{
+    if (m_workflowCanvas == nullptr) {
+        return;
+    }
+
     QScopedValueRollback<bool> guard(m_renderingWorkflow, true);
-    m_workflowCanvas->setWorkflow(m_store.currentWorkflow());
+    m_workflowCanvas->setWorkflow(workflow);
+    m_workflowCanvas->setHistory(history);
     m_workflowCanvas->applyRuntimeIoSpecs(
-        m_appContext.workflowIoController().visualSpecsForWorkflow(m_store.currentWorkflow()));
+        m_appContext.workflowIoController().visualSpecsForWorkflow(workflow));
 }
 
 void MainWindow::clearCanvasWorkflowView()
@@ -309,6 +444,8 @@ void MainWindow::clearCanvasWorkflowView()
 
     QScopedValueRollback<bool> guard(m_renderingWorkflow, true);
     m_workflowCanvas->clearWorkflow();
+    m_appContext.canvasNavigationController().reset();
+    updateCanvasBreadcrumb();
 }
 
 void MainWindow::updateCanvasOverlay()
@@ -318,31 +455,91 @@ void MainWindow::updateCanvasOverlay()
     }
 
     if (m_store.currentWorkspace().rootPath.isEmpty()) {
-        if (m_commandBar != nullptr) {
-            m_commandBar->setWorkspaceInfo(tr("Visual Workflow Studio"));
-            m_commandBar->setWorkflowInfo(tr("No workspace"));
-        }
         m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::NoWorkspace);
+        updateCanvasBreadcrumb();
         return;
-    }
-
-    if (m_commandBar != nullptr) {
-        m_commandBar->setWorkspaceInfo(m_store.currentWorkspace().name);
     }
 
     if (m_store.currentWorkflow().workflowId.isEmpty()) {
-        if (m_commandBar != nullptr) {
-            m_commandBar->setWorkflowInfo(tr("No workflow"));
-        }
         m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::NoWorkflow);
+        updateCanvasBreadcrumb();
         return;
     }
 
-    if (m_commandBar != nullptr) {
-        m_commandBar->setWorkflowInfo(m_store.currentWorkflow().name);
+    m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::Hidden);
+    updateCanvasBreadcrumb();
+}
+
+void MainWindow::updateCanvasBreadcrumb()
+{
+    if (m_canvasHeader == nullptr) {
+        return;
+    }
+    if (m_appContext.canvasNavigationController().hasRootWorkflow()) {
+        m_canvasHeader->render(m_appContext.canvasNavigationController().breadcrumbViewModel());
+        return;
     }
 
-    m_canvasOverlay->render(ui::EmptyStateOverlay::Mode::Hidden);
+    ui::CanvasBreadcrumbViewModel viewModel;
+    ui::CanvasBreadcrumbItemViewModel workspaceItem;
+    workspaceItem.label = m_store.currentWorkspace().name.trimmed().isEmpty()
+        ? tr("No workspace")
+        : m_store.currentWorkspace().name.trimmed();
+    workspaceItem.clickable = false;
+    viewModel.items.append(workspaceItem);
+    if (m_store.currentWorkflow().workflowId.isEmpty()) {
+        ui::CanvasBreadcrumbItemViewModel workflowItem;
+        workflowItem.label = tr("No workflow");
+        workflowItem.depth = 1;
+        workflowItem.clickable = false;
+        viewModel.items.append(workflowItem);
+    }
+    m_canvasHeader->render(viewModel);
+}
+
+void MainWindow::enterSubsystemNode(const domain::Node& node)
+{
+    QString errorMessage;
+    if (!m_appContext.canvasNavigationController().enterSubsystem(
+            m_workflowCanvas->workflow(),
+            m_workflowCanvas->history(),
+            node.nodeId,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Subsystem"), errorMessage);
+        return;
+    }
+
+    renderWorkflowOnCanvas(
+        m_appContext.canvasNavigationController().currentWorkflow(),
+        m_appContext.canvasNavigationController().currentHistory());
+    applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
+    resetInspectorView();
+    updateCanvasOverlay();
+}
+
+void MainWindow::navigateCanvasBreadcrumb(int depth)
+{
+    QString errorMessage;
+    if (!m_appContext.canvasNavigationController().navigateToDepth(
+            depth,
+            m_workflowCanvas->workflow(),
+            m_workflowCanvas->history(),
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Canvas Navigation"), errorMessage);
+        return;
+    }
+
+    if (depth == 0) {
+        const auto rootWorkflow = m_appContext.canvasNavigationController().rootWorkflow();
+        m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
+    }
+
+    renderWorkflowOnCanvas(
+        m_appContext.canvasNavigationController().currentWorkflow(),
+        m_appContext.canvasNavigationController().currentHistory());
+    applyCachedNodeStatusesForWorkflow(m_store.currentWorkflow().workflowId);
+    resetInspectorView();
+    updateCanvasOverlay();
 }
 
 void MainWindow::createWorkspace()
@@ -372,6 +569,7 @@ void MainWindow::createWorkspace()
     }
 
     clearCanvasWorkflowView();
+    m_appContext.canvasNavigationController().reset();
     resetInspectorAndOutput();
     applyWorkspacePythonExecutable();
     refreshWorkspaceExplorer();
@@ -393,6 +591,7 @@ void MainWindow::openWorkspace()
     }
 
     clearCanvasWorkflowView();
+    m_appContext.canvasNavigationController().reset();
     resetInspectorAndOutput();
     applyWorkspacePythonExecutable();
     refreshWorkspaceExplorer();
@@ -444,6 +643,7 @@ void MainWindow::createWorkflow()
         return;
     }
 
+    cacheCurrentWorkflowViewState();
     m_appContext.workflowController().createWorkflow(workflowName);
     renderCurrentWorkflowOnCanvas();
     resetInspectorAndOutput();
@@ -469,6 +669,7 @@ void MainWindow::loadWorkflow()
         return;
     }
 
+    cacheCurrentWorkflowViewState();
     QString errorMessage;
     if (!m_appContext.workflowController().loadWorkflowFile(filePath, &errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
@@ -516,6 +717,7 @@ void MainWindow::openWorkflowGenerationDialog()
 
     connect(dialog, &ui::WorkflowGenerationDialog::importJsonRequested, this,
         [this, guardedDialog](const QString& jsonText) {
+            cacheCurrentWorkflowViewState();
             presentation::WorkflowGenerationUiResult result;
             if (!m_appContext.workflowGenerationController().importGeneratedJson(jsonText, result)) {
                 if (!guardedDialog.isNull()) {
@@ -540,6 +742,7 @@ void MainWindow::openWorkflowGenerationDialog()
             if (guardedDialog.isNull()) {
                 return;
             }
+            cacheCurrentWorkflowViewState();
             guardedDialog->setLoading(true);
             guardedDialog->setStatusMessage(tr("Generating workflow..."));
             m_appContext.workflowGenerationController().generateWorkflow(
@@ -581,7 +784,14 @@ void MainWindow::openWorkflowById(const QString& workflowId)
     if (!ensureWorkspaceOpen() || workflowId.trimmed().isEmpty()) {
         return;
     }
+    if (m_store.currentWorkflow().workflowId == workflowId) {
+        if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+            navigateCanvasBreadcrumb(0);
+        }
+        return;
+    }
 
+    cacheCurrentWorkflowViewState();
     QString errorMessage;
     if (!m_appContext.workflowController().loadWorkflowFromWorkspace(workflowId, &errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
@@ -624,14 +834,105 @@ void MainWindow::deleteWorkflowById(const QString& workflowId, const QString& wo
 
     if (m_store.currentWorkflow().workflowId == workflowId) {
         clearCanvasWorkflowView();
+        m_appContext.canvasNavigationController().reset();
         m_store.clearCurrentWorkflow();
+        m_store.removeOpenWorkflowDocument(workflowId);
+        m_store.removeWorkflowHistory(workflowId);
         resetInspectorAndOutput();
         updateCanvasOverlay();
+    } else {
+        m_store.removeOpenWorkflowDocument(workflowId);
+        m_store.removeWorkflowHistory(workflowId);
     }
 
     refreshWorkspaceExplorer();
     m_outputPanel->appendStdout(
         tr("Deleted workflow: %1; deleted runs: %2").arg(displayName).arg(deletedRunCount));
+}
+
+void MainWindow::renameWorkflowById(const QString& workflowId, const QString& workflowName)
+{
+    if (!ensureWorkspaceOpen() || workflowId.trimmed().isEmpty()) {
+        return;
+    }
+
+    const auto newName = workflowName.trimmed();
+    if (newName.isEmpty()) {
+        QMessageBox::warning(this, tr("Rename Workflow"), tr("Workflow name cannot be empty."));
+        refreshWorkspaceExplorer();
+        return;
+    }
+
+    cacheCurrentWorkflowViewState();
+    QString errorMessage;
+    if (!m_appContext.workflowController().renameWorkflow(workflowId, newName, &errorMessage)) {
+        QMessageBox::warning(this, tr("Rename Workflow"), errorMessage);
+        refreshWorkspaceExplorer();
+        return;
+    }
+
+    if (m_store.currentWorkflow().workflowId == workflowId) {
+        if (!m_appContext.canvasNavigationController().isInsideSubsystem()) {
+            renderCurrentWorkflowOnCanvas();
+            applyCachedNodeStatusesForWorkflow(workflowId);
+        }
+        updateCanvasBreadcrumb();
+    }
+
+    refreshWorkspaceExplorer();
+    m_outputPanel->appendStdout(tr("Renamed workflow: %1").arg(newName));
+}
+
+void MainWindow::addWorkflowAsSubsystemNode(const QString& workflowId, const QString& workflowName)
+{
+    if (!ensureWorkspaceOpen() || !ensureWorkflowOpen() || workflowId.trimmed().isEmpty()) {
+        return;
+    }
+
+    cacheCurrentWorkflowViewState();
+    if (m_store.currentWorkflow().workflowId == workflowId) {
+        QMessageBox::warning(
+            this,
+            tr("Add Subsystem"),
+            tr("Cannot add the current workflow as a subsystem of itself."));
+        return;
+    }
+
+    domain::Workflow sourceWorkflow;
+    QString errorMessage;
+    if (!m_appContext.workflowController().workflowSnapshot(workflowId, sourceWorkflow, &errorMessage)) {
+        QMessageBox::warning(this, tr("Add Subsystem"), errorMessage);
+        return;
+    }
+
+    const auto scenePos = m_workflowCanvas->mapToScene(m_workflowCanvas->viewport()->rect().center());
+    domain::NodePosition position;
+    position.x = scenePos.x();
+    position.y = scenePos.y();
+
+    auto subsystemNode = m_appContext.subsystemService().createSubsystemNode(
+        m_store.currentWorkspace().id,
+        sourceWorkflow.name.trimmed().isEmpty() ? workflowName : sourceWorkflow.name,
+        position);
+    subsystemNode.description = sourceWorkflow.description.trimmed().isEmpty()
+        ? tr("Subsystem copied from workflow: %1").arg(
+            sourceWorkflow.name.trimmed().isEmpty() ? workflowId : sourceWorkflow.name)
+        : sourceWorkflow.description;
+
+    auto embeddedWorkflow = sourceWorkflow;
+    embeddedWorkflow.workflowId = QStringLiteral("%1__subworkflow").arg(subsystemNode.nodeId);
+    embeddedWorkflow.workspaceId = m_store.currentWorkspace().id;
+    if (!m_appContext.subsystemService().saveSubsystemWorkflow(
+            subsystemNode,
+            embeddedWorkflow,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Add Subsystem"), errorMessage);
+        return;
+    }
+
+    m_workflowCanvas->addNode(subsystemNode);
+    m_outputPanel->appendStdout(
+        tr("Added workflow as subsystem node: %1").arg(subsystemNode.name));
 }
 
 void MainWindow::openRunById(const QString& runId)
@@ -693,6 +994,7 @@ void MainWindow::restoreRunRecordToUi(
     const domain::Workflow& workflowSnapshot,
     const QHash<QString, QJsonObject>& nodeOutputsByNodeId)
 {
+    cacheCurrentWorkflowViewState();
     m_store.setCurrentWorkflow(workflowSnapshot);
     renderCurrentWorkflowOnCanvas();
     updateCanvasOverlay();
@@ -726,15 +1028,31 @@ void MainWindow::saveWorkflow()
         return;
     }
 
-    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
-
+    domain::Workflow rootWorkflow;
     QString errorMessage;
+    if (!m_appContext.canvasNavigationController().hasRootWorkflow()) {
+        rootWorkflow = m_workflowCanvas->workflow();
+    } else if (!m_appContext.canvasNavigationController().flushCurrentWorkflow(
+            m_workflowCanvas->workflow(),
+            m_workflowCanvas->history(),
+            rootWorkflow,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
+        return;
+    }
+
+    m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
+
     if (!m_appContext.workflowController().saveCurrentWorkflow(&errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
         return;
     }
 
+    if (!m_appContext.canvasNavigationController().isInsideSubsystem()) {
+        m_store.cacheWorkflowHistory(m_store.currentWorkflow().workflowId, m_workflowCanvas->history());
+    }
     refreshWorkspaceExplorer();
+    updateCanvasBreadcrumb();
     m_outputPanel->appendStdout(tr("Saved workflow: %1").arg(m_store.currentWorkflow().name));
 }
 
@@ -744,7 +1062,11 @@ void MainWindow::saveSelectedNodeAsTemplate()
         return;
     }
 
-    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
+    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(m_workflowCanvas->workflow());
+    } else {
+        m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
+    }
     const auto selectedNode = m_workflowCanvas->selectedNode();
     if (!selectedNode.has_value()) {
         QMessageBox::information(this, tr("Template Required"), tr("Select one node on the canvas before saving a template."));
@@ -863,7 +1185,19 @@ void MainWindow::runCurrentWorkflow()
         return;
     }
 
-    m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
+    domain::Workflow rootWorkflow;
+    QString flushError;
+    if (m_appContext.canvasNavigationController().hasRootWorkflow()
+        && !m_appContext.canvasNavigationController().flushCurrentWorkflow(
+            m_workflowCanvas->workflow(),
+            m_workflowCanvas->history(),
+            rootWorkflow,
+            &flushError)) {
+        QMessageBox::warning(this, tr("Run Workflow"), flushError);
+        return;
+    }
+    m_appContext.workflowController().syncCurrentWorkflowFromView(
+        m_appContext.canvasNavigationController().hasRootWorkflow() ? rootWorkflow : m_workflowCanvas->workflow());
     applyWorkspacePythonExecutable();
     if (m_appContext.pythonEnvironmentController().pythonExecutable().trimmed().isEmpty()) {
         QMessageBox::warning(this, tr("Run Workflow"), tr("Select a Python interpreter for this workspace before running a workflow."));
@@ -888,8 +1222,14 @@ void MainWindow::runCurrentWorkflow()
 
     m_outputPanel->appendStdout(tr("Run started in background."));
 
+    execution::WorkflowRunOptions runOptions;
+    if (m_animateNodeStatusAction != nullptr && m_animateNodeStatusAction->isChecked()) {
+        runOptions.nodeDispatchDelayMs = qMax(0, m_nodeDispatchDelayMs);
+    }
+
     m_appContext.runController().runWorkflowAsync(
         runPlan.workflow,
+        runOptions,
         runPlan.workspaceRootPath,
         runPlan.runRootPath,
         runPlan.artifactPath,
@@ -930,7 +1270,7 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
     const auto language = nodeConfig.language();
     const auto isPythonCodeNode = NodeTypes::isPythonBacked(node.type);
     if (!isPythonCodeNode || language != "python") {
-        QMessageBox::information(this, tr("Python Editor"), tr("Only Python-based starter, function, and agent nodes can be edited here."));
+        QMessageBox::information(this, tr("Python Editor"), tr("Only Python-based starter, function, agent, and loop nodes can be edited here."));
         return;
     }
 
@@ -950,8 +1290,33 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
         [this, nodeId = node.nodeId](const QString& name, const QString& description, int timeoutMs, const QString& code, const QJsonObject& configPatch) {
         // The save button/close prompt is also inside a UI event. Defer canvas mutation to the next event turn.
         QTimer::singleShot(0, this, [this, nodeId, name, description, timeoutMs, code, configPatch]() {
-            m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
             QString errorMessage;
+            if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+                auto workflow = m_workflowCanvas->workflow();
+                if (!application::WorkflowService().updateNodeDetails(
+                        workflow,
+                        nodeId,
+                        name,
+                        description,
+                        timeoutMs,
+                        code,
+                        configPatch,
+                        &errorMessage)) {
+                    QMessageBox::warning(this, tr("Save Python Code"), errorMessage);
+                    return;
+                }
+
+                m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
+                for (const auto& updatedNode : workflow.nodes) {
+                    if (updatedNode.nodeId == nodeId) {
+                        m_workflowCanvas->updateNode(updatedNode);
+                        m_outputPanel->appendStdout(tr("Saved Python code for node: %1").arg(updatedNode.name));
+                        break;
+                    }
+                }
+                return;
+            }
+
             if (!m_appContext.workflowController().updateNodeDetails(
                     nodeId,
                     name,
@@ -976,6 +1341,81 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
     dialog->show();
     dialog->raise();
     dialog->activateWindow();
+}
+
+void MainWindow::retitleSubsystemNode(const domain::Node& node)
+{
+    if (!m_appContext.subsystemService().isSubsystemNode(node)) {
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Retitle Subsystem Node"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* formLayout = new QFormLayout();
+
+    auto* titleEdit = new QLineEdit(node.name, &dialog);
+    auto* descriptionEdit = new QPlainTextEdit(node.description, &dialog);
+    descriptionEdit->setFixedHeight(72);
+    formLayout->addRow(tr("Title"), titleEdit);
+    formLayout->addRow(tr("Description"), descriptionEdit);
+    layout->addLayout(formLayout);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    auto updatedNode = node;
+    const auto newTitle = titleEdit->text().trimmed();
+    if (newTitle.isEmpty()) {
+        QMessageBox::warning(this, tr("Retitle Node"), tr("Subsystem title cannot be empty."));
+        return;
+    }
+    updatedNode.name = newTitle;
+    updatedNode.description = descriptionEdit->toPlainText();
+
+    domain::Workflow embeddedWorkflow;
+    QString errorMessage;
+    if (!m_appContext.subsystemService().loadSubsystemWorkflow(
+            updatedNode,
+            embeddedWorkflow,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Retitle Node"), errorMessage);
+        return;
+    }
+
+    embeddedWorkflow.name = updatedNode.name;
+    embeddedWorkflow.description = updatedNode.description;
+    if (!m_appContext.subsystemService().saveSubsystemWorkflow(
+            updatedNode,
+            embeddedWorkflow,
+            &errorMessage)) {
+        QMessageBox::warning(this, tr("Retitle Node"), errorMessage);
+        return;
+    }
+
+    if (!m_workflowCanvas->updateNode(updatedNode)) {
+        QMessageBox::warning(this, tr("Retitle Node"), tr("Could not update the selected subsystem node."));
+        return;
+    }
+
+    const auto updatedWorkflow = m_workflowCanvas->workflow();
+    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
+        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(updatedWorkflow);
+    } else {
+        m_appContext.workflowController().syncCurrentWorkflowFromView(updatedWorkflow);
+        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(updatedWorkflow);
+    }
+
+    m_nodeInspector->displayNode(updatedNode, m_store.nodeOutputsByNodeId().value(updatedNode.nodeId));
+    updateSelectedNodeStatus(updatedNode);
+    updateCanvasBreadcrumb();
+    m_outputPanel->appendStdout(tr("Retitled subsystem node: %1").arg(updatedNode.name));
 }
 
 void MainWindow::refreshWorkspaceExplorer()
@@ -1044,6 +1484,26 @@ void MainWindow::updateSelectedNodeStatus(const domain::Node& node)
     }
 }
 
+void MainWindow::configureNodeDispatchDelay()
+{
+    bool accepted = false;
+    const int delayMs = QInputDialog::getInt(
+        this,
+        tr("Node Step Delay"),
+        tr("Delay between completed node and next node (ms)"),
+        m_nodeDispatchDelayMs,
+        0,
+        5000,
+        10,
+        &accepted);
+    if (!accepted) {
+        return;
+    }
+
+    m_nodeDispatchDelayMs = delayMs;
+    statusBar()->showMessage(tr("Node step delay: %1 ms").arg(m_nodeDispatchDelayMs), 3000);
+}
+
 bool MainWindow::ensureWorkspaceOpen()
 {
     if (!m_store.currentWorkspace().rootPath.isEmpty()) {
@@ -1066,14 +1526,21 @@ bool MainWindow::ensureWorkflowOpen()
 
 void MainWindow::resetInspectorAndOutput()
 {
-    m_store.resetForWorkflowChange();
+    resetInspectorView();
 
-    if (m_nodeInspector != nullptr) {
-        m_nodeInspector->clear();
-    }
+    m_store.clearNodeOutputs();
 
     if (m_outputPanel != nullptr) {
         m_outputPanel->clearRun();
+    }
+}
+
+void MainWindow::resetInspectorView()
+{
+    m_store.clearSelection();
+
+    if (m_nodeInspector != nullptr) {
+        m_nodeInspector->clear();
     }
 
     if (m_timeoutStatusLabel != nullptr) {

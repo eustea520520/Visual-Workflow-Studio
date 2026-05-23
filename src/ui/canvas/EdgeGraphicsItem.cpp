@@ -22,9 +22,6 @@ constexpr qreal EdgeParallelStep = 8.0;
 
 QString endpointText(const QString& nodeId, const QString& portName, int slotIndex)
 {
-    if (slotIndex < 0) {
-        return QStringLiteral("%1.%2").arg(nodeId, portName);
-    }
     return QStringLiteral("%1.%2[%3]").arg(nodeId, portName).arg(slotIndex + 1);
 }
 

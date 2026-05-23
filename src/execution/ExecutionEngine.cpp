@@ -4,6 +4,7 @@
 #include "execution/ExecutionOutputRouter.h"
 #include "execution/ExecutionPlanner.h"
 #include "execution/InputMerger.h"
+#include "execution/LoopNodeExecutor.h"
 #include "execution/NodeExecutionRequestBuilder.h"
 #include "execution/NodeReadinessTracker.h"
 #include "execution/NodeResultStatus.h"
@@ -11,19 +12,99 @@
 #include "execution/ExecutionSchedulingPolicy.h"
 #include "execution/ThreadTrace.h"
 #include "execution/WorkerPool.h"
+#include "domain/NodeConfigKeys.h"
+#include "domain/NodeTypes.h"
 #include "workers/WorkerRegistry.h"
 
 #include <QDir>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
 #include <QRunnable>
 #include <QSet>
+#include <QThread>
 #include <QWaitCondition>
 #include <QUuid>
 
+#include <functional>
+
 namespace vws::execution {
+
+namespace {
+
+struct SubsystemBoundaryPortRuntime {
+    QString externalPort;
+    QString internalNodeId;
+    QString internalPort;
+};
+
+QList<SubsystemBoundaryPortRuntime> boundaryPorts(const QJsonObject& boundary, const QString& key)
+{
+    QList<SubsystemBoundaryPortRuntime> ports;
+    const auto array = boundary.value(key).toArray();
+    for (const auto& value : array) {
+        const auto object = value.toObject();
+        SubsystemBoundaryPortRuntime port;
+        port.externalPort = object.value("external_port").toString();
+        port.internalNodeId = object.value("internal_node_id").toString();
+        port.internalPort = object.value("internal_port").toString();
+        if (!port.externalPort.isEmpty() && !port.internalNodeId.isEmpty() && !port.internalPort.isEmpty()) {
+            ports.append(port);
+        }
+    }
+    return ports;
+}
+
+QHash<QString, QJsonObject> subsystemInitialInputs(
+    const QList<SubsystemBoundaryPortRuntime>& ports,
+    const QJsonObject& externalInputs)
+{
+    QHash<QString, QJsonObject> mapped;
+    for (const auto& port : ports) {
+        auto nodeInputs = mapped.value(port.internalNodeId);
+        nodeInputs.insert(port.internalPort, externalInputs.value(port.externalPort));
+        mapped.insert(port.internalNodeId, nodeInputs);
+    }
+    return mapped;
+}
+
+QJsonObject subsystemOutputs(
+    const QList<SubsystemBoundaryPortRuntime>& ports,
+    const WorkflowExecutionResult& internalResult)
+{
+    QJsonObject outputs;
+    for (const auto& port : ports) {
+        const auto nodeResult = internalResult.nodeResults.value(port.internalNodeId);
+        outputs.insert(port.externalPort,
+            nodeResult.outputs.contains(port.internalPort)
+                ? nodeResult.outputs.value(port.internalPort)
+                : QJsonValue(nodeResult.outputs));
+    }
+    return outputs;
+}
+
+QString subsystemTextOutput(
+    const domain::Workflow& subWorkflow,
+    const WorkflowExecutionResult& internalResult,
+    const std::function<QString(const NodeExecutionResult&)>& textSelector)
+{
+    QStringList chunks;
+    for (const auto& node : subWorkflow.nodes) {
+        const auto nodeResult = internalResult.nodeResults.value(node.nodeId);
+        const auto text = textSelector(nodeResult).trimmed();
+        if (text.isEmpty()) {
+            continue;
+        }
+        const auto label = node.name.trimmed().isEmpty() ? node.nodeId : node.name.trimmed();
+        chunks.append(QStringLiteral("[%1]\n%2").arg(label, text));
+    }
+    return chunks.join(QStringLiteral("\n\n"));
+}
+
+} // namespace
 
 ExecutionEngine::ExecutionEngine(workers::WorkerRegistry& workerRegistry)
     : m_workerRegistry(workerRegistry)
@@ -53,12 +134,31 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
     const QString& runPath,
     const QString& artifactPath)
 {
-    ExecutionRunState runState(QUuid::createUuid().toString(QUuid::WithoutBraces), workflow.nodes.size());
+    return runWorkflow(workflow, WorkflowRunOptions{}, workspacePath, runPath, artifactPath);
+}
+
+WorkflowExecutionResult ExecutionEngine::runWorkflow(
+    const domain::Workflow& workflow,
+    const WorkflowRunOptions& options,
+    const QString& workspacePath,
+    const QString& runPath,
+    const QString& artifactPath)
+{
+    const bool usingExternalRunId = !options.runIdOverride.trimmed().isEmpty();
+    ExecutionRunState runState(
+        usingExternalRunId
+            ? options.runIdOverride.trimmed()
+            : QUuid::createUuid().toString(QUuid::WithoutBraces),
+        workflow.nodes.size());
     auto& result = runState.result();
     m_cancellationState.beginRun(result.runId);
+    auto isRunCancelRequested = [&]() {
+        return m_cancellationState.isCancelRequested()
+            || (options.cancelPredicate && options.cancelPredicate());
+    };
     const auto effectiveRunPath = runPath.trimmed().isEmpty()
         ? QString{}
-        : QDir(runPath).filePath(result.runId);
+        : (usingExternalRunId ? runPath : QDir(runPath).filePath(result.runId));
     auto publishThreadTrace = [&](const QString& nodeId, const QString& phase) {
         const auto trace = currentThreadTraceInfo();
         m_eventBus.publishThreadTrace(result.runId, nodeId, phase, trace.threadId, trace.threadName);
@@ -69,7 +169,7 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
     publishThreadTrace({}, QStringLiteral("Workflow validation started"));
 
     ExecutionPlanner planner;
-    const auto executionPlan = planner.plan(workflow);
+    const auto executionPlan = planner.plan(workflow, options.validationMode);
     if (!executionPlan.valid) {
         result.success = false;
         runState.setWorkflowStatus(WorkflowStatus::Failed);
@@ -80,6 +180,19 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
     }
 
     const auto& indexes = executionPlan.indexes;
+    QHash<QString, QString> loopBodyByLoopNodeId;
+    QSet<QString> loopBodyNodeIds;
+    for (const auto& node : workflow.nodes) {
+        if (node.type.trimmed().toLower() != domain::NodeTypes::Loop) {
+            continue;
+        }
+        const auto outgoingEdges = indexes.outgoingEdgesByNode.value(node.nodeId);
+        if (!outgoingEdges.isEmpty()) {
+            const auto bodyNodeId = outgoingEdges.first().toNode;
+            loopBodyByLoopNodeId.insert(node.nodeId, bodyNodeId);
+            loopBodyNodeIds.insert(bodyNodeId);
+        }
+    }
 
     QMutex mutex;
     QWaitCondition finishedCondition;
@@ -103,6 +216,20 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
         m_eventBus.publishNodeStatusChanged(result.runId, nodeId, status);
     };
 
+    auto waitAfterVisibleNodeStatus = [&]() {
+        if (options.nodeDispatchDelayMs > 0 && !isRunCancelRequested()) {
+            QThread::msleep(static_cast<unsigned long>(options.nodeDispatchDelayMs));
+        }
+    };
+
+    auto shouldPauseAfterStatus = [](NodeStatus status) {
+        return status == NodeStatus::Running
+            || status == NodeStatus::Succeeded
+            || status == NodeStatus::Failed
+            || status == NodeStatus::Timeout
+            || status == NodeStatus::Cancelled;
+    };
+
     std::function<void(const QString&)> skipDescendantsLocked = [&](const QString& nodeId) {
         for (const auto& edge : indexes.outgoingEdgesByNode.value(nodeId)) {
             const auto childId = edge.toNode;
@@ -116,14 +243,21 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
 
     std::function<void(const QString&)> submitNode;
     auto scheduleIfReadyLocked = [&](const QString& nodeId) {
-        if (m_cancellationState.isCancelRequested()) {
+        if (isRunCancelRequested()) {
             return;
         }
         const auto currentStatus = runState.nodeStatus(nodeId);
         if (!schedulingPolicy.canStillBeScheduled(currentStatus)) {
             return;
         }
-        if (!schedulingPolicy.isStarterNode(indexes.nodesById.value(nodeId)) && !readiness.isReady(nodeId, indexes, runState.completedEdgeData())) {
+        const auto node = indexes.nodesById.value(nodeId);
+        if (loopBodyNodeIds.contains(nodeId)) {
+            return;
+        }
+        const bool implicitEntryNode = options.allowImplicitEntryNodes
+            && indexes.incomingEdgesByNode.value(nodeId).isEmpty();
+        if (!schedulingPolicy.isTopLevelEntryNode(node) && !implicitEntryNode
+            && !readiness.isReady(nodeId, indexes, runState.completedEdgeData())) {
             if (currentStatus == NodeStatus::Pending) {
                 setStatusLocked(nodeId, NodeStatus::Waiting);
             }
@@ -140,7 +274,7 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
             return;
         }
 
-        if (m_cancellationState.isCancelRequested() && runState.activeTasks() == 0) {
+        if (isRunCancelRequested() && runState.activeTasks() == 0) {
             for (const auto& node : workflow.nodes) {
                 if (!schedulingPolicy.isTerminalStatus(runState.nodeStatus(node.nodeId))) {
                     finishOneLocked(node.nodeId, NodeStatus::Cancelled);
@@ -162,8 +296,145 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
         }
     };
 
+    auto cancelledNestedResult = [](const QString& runId) {
+        WorkflowExecutionResult nestedResult;
+        nestedResult.runId = runId;
+        nestedResult.success = false;
+        nestedResult.status = workflowStatusToString(WorkflowStatus::Cancelled);
+        nestedResult.errors.append(QStringLiteral("Run was cancelled."));
+        return nestedResult;
+    };
+
+    auto runNestedWorkflow = [&](
+        const QString& outerRunId,
+        const domain::Workflow& nestedWorkflow,
+        const WorkflowRunOptions& nestedOptions,
+        const QString& nestedWorkspacePath,
+        const QString& nestedRunPath,
+        const QString& nestedArtifactPath) {
+        if (isRunCancelRequested()) {
+            return cancelledNestedResult(outerRunId);
+        }
+
+        ExecutionEngine nestedEngine(m_workerRegistry);
+        const auto forwardNodeStatus = [this, outerRunId](const QString&, const QString& nodeId, const QString& status) {
+            m_eventBus.publishNodeStatusText(outerRunId, nodeId, status);
+        };
+        const auto forwardNodeError = [this, outerRunId](const QString&, const QString& nodeId, const QString& message) {
+            m_eventBus.publishNodeError(outerRunId, nodeId, message);
+        };
+        const auto forwardThreadTrace = [this, outerRunId](
+            const QString&,
+            const QString& nodeId,
+            const QString& phase,
+            const QString& threadId,
+            const QString& threadName) {
+            m_eventBus.publishThreadTrace(outerRunId, nodeId, phase, threadId, threadName);
+        };
+
+        QObject::connect(&nestedEngine.eventBus(),
+            &ExecutionEventBus::nodeStatusChanged,
+            &m_eventBus,
+            forwardNodeStatus,
+            Qt::DirectConnection);
+        QObject::connect(&nestedEngine.eventBus(),
+            &ExecutionEventBus::nodeError,
+            &m_eventBus,
+            forwardNodeError,
+            Qt::DirectConnection);
+        QObject::connect(&nestedEngine.eventBus(),
+            &ExecutionEventBus::threadTrace,
+            &m_eventBus,
+            forwardThreadTrace,
+            Qt::DirectConnection);
+
+        auto effectiveOptions = nestedOptions;
+        effectiveOptions.runIdOverride = outerRunId;
+        effectiveOptions.cancelPredicate = [&]() { return isRunCancelRequested(); };
+        return nestedEngine.runWorkflow(
+            nestedWorkflow,
+            effectiveOptions,
+            nestedWorkspacePath,
+            nestedRunPath,
+            nestedArtifactPath);
+    };
+
+    auto makeNestedWorkflowRunner = [&](const QString& outerRunId) {
+        return [&, outerRunId](const domain::Workflow& nestedWorkflow, const WorkflowRunOptions& nestedOptions) {
+            return runNestedWorkflow(
+                outerRunId,
+                nestedWorkflow,
+                nestedOptions,
+                workspacePath,
+                effectiveRunPath,
+                artifactPath);
+        };
+    };
+
+    auto executeSubsystemNode = [&](const NodeExecutionRequest& request) {
+        NodeExecutionResult nodeResult;
+        nodeResult.runId = request.runId;
+        nodeResult.nodeId = request.nodeId;
+
+        if (isRunCancelRequested()) {
+            nodeResult.errorMessage = QStringLiteral("Run was cancelled.");
+            return nodeResult;
+        }
+
+        const auto subWorkflowObject = request.nodeConfig.value(domain::NodeConfigKeys::SubsystemWorkflow).toObject();
+        if (subWorkflowObject.isEmpty()) {
+            nodeResult.errorMessage = QStringLiteral("Subsystem node has no embedded workflow.");
+            return nodeResult;
+        }
+
+        const auto subWorkflow = domain::Workflow::fromJson(subWorkflowObject);
+        if (subWorkflow.nodes.isEmpty()) {
+            nodeResult.errorMessage = QStringLiteral("Subsystem workflow is empty.");
+            return nodeResult;
+        }
+
+        const auto boundary = request.nodeConfig.value(domain::NodeConfigKeys::SubsystemBoundary).toObject();
+        WorkflowRunOptions subOptions;
+        subOptions.validationMode = GraphValidationMode::SubsystemWorkflow;
+        subOptions.allowImplicitEntryNodes = true;
+        subOptions.nodeDispatchDelayMs = options.nodeDispatchDelayMs;
+        subOptions.initialInputsByNodeId = subsystemInitialInputs(boundaryPorts(boundary, "inputs"), request.inputs);
+
+        const auto internalResult = runNestedWorkflow(
+            request.runId,
+            subWorkflow,
+            subOptions,
+            request.workspacePath,
+            request.runPath,
+            request.artifactPath);
+
+        nodeResult.success = internalResult.success;
+        nodeResult.outputs = subsystemOutputs(boundaryPorts(boundary, "outputs"), internalResult);
+        nodeResult.stdoutText = subsystemTextOutput(
+            subWorkflow,
+            internalResult,
+            [](const NodeExecutionResult& result) { return result.stdoutText; });
+        nodeResult.stderrText = subsystemTextOutput(
+            subWorkflow,
+            internalResult,
+            [](const NodeExecutionResult& result) { return result.stderrText; });
+        for (const auto& internalNodeResult : internalResult.nodeResults) {
+            nodeResult.artifacts.append(internalNodeResult.artifacts);
+        }
+        if (!internalResult.success) {
+            nodeResult.errorMessage = QStringLiteral("Subsystem workflow failed: %1")
+                .arg(internalResult.errors.join("; "));
+        }
+        return nodeResult;
+    };
+
     submitNode = [&](const QString& nodeId) {
-        const auto request = requestBuilder.build(nodeId, indexes, runState.completedEdgeData(), inputMerger);
+        const auto request = requestBuilder.build(
+            nodeId,
+            indexes,
+            runState.completedEdgeData(),
+            inputMerger,
+            options.initialInputsByNodeId);
         // scheduleIfReadyLocked already owns the mutex; this scope must not lock it again.
         publishThreadTrace(nodeId, QStringLiteral("Node task queued"));
 
@@ -171,18 +442,80 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
             publishThreadTrace(request.nodeId, QStringLiteral("Node worker thread started"));
             {
                 QMutexLocker locker(&mutex);
-                setStatusLocked(request.nodeId, NodeStatus::Running);
+                if (request.nodeType != domain::NodeTypes::Loop
+                    || !loopBodyByLoopNodeId.contains(request.nodeId)) {
+                    setStatusLocked(request.nodeId, NodeStatus::Running);
+                }
+            }
+            if (request.nodeType != domain::NodeTypes::Loop
+                || !loopBodyByLoopNodeId.contains(request.nodeId)) {
+                waitAfterVisibleNodeStatus();
             }
 
-            auto nodeResult = nodeTaskRunner.execute(request);
+            LoopNodeExecutionResult loopExecutionResult;
+            const bool isLoopNode = request.nodeType == domain::NodeTypes::Loop
+                && loopBodyByLoopNodeId.contains(request.nodeId);
+            auto nodeResult = [&]() {
+                if (request.nodeType == domain::NodeTypes::Subsystem) {
+                    return executeSubsystemNode(request);
+                }
+                if (isLoopNode) {
+                    const auto bodyNodeId = loopBodyByLoopNodeId.value(request.nodeId);
+                    const auto bodyNode = indexes.nodesById.value(bodyNodeId);
+                    QList<domain::Edge> loopToBodyEdges;
+                    for (const auto& edge : indexes.outgoingEdgesByNode.value(request.nodeId)) {
+                        if (edge.toNode == bodyNodeId) {
+                            loopToBodyEdges.append(edge);
+                        }
+                    }
+
+                    const LoopNodeExecutor loopExecutor;
+                    loopExecutionResult = loopExecutor.execute(
+                        request,
+                        bodyNode,
+                        loopToBodyEdges,
+                        request.nodeConfig.value(domain::NodeConfigKeys::LoopIterations).toInt(0),
+                        [&](const NodeExecutionRequest& loopIterationRequest) {
+                            return nodeTaskRunner.execute(loopIterationRequest);
+                        },
+                        [&](const NodeExecutionRequest& bodyRequest) {
+                            return bodyRequest.nodeType == domain::NodeTypes::Subsystem
+                                ? executeSubsystemNode(bodyRequest)
+                                : nodeTaskRunner.execute(bodyRequest);
+                        },
+                        [&](int iteration, const QString& nodeId, NodeStatus status) {
+                            Q_UNUSED(iteration);
+                            m_eventBus.publishNodeStatusChanged(result.runId, nodeId, status);
+                            if (shouldPauseAfterStatus(status)) {
+                                waitAfterVisibleNodeStatus();
+                            }
+                        },
+                        [&]() { return isRunCancelRequested(); });
+                    if (loopExecutionResult.success) {
+                        return loopExecutionResult.loopResult;
+                    }
+                    NodeExecutionResult failedResult = loopExecutionResult.loopResult;
+                    failedResult.runId = request.runId;
+                    failedResult.nodeId = request.nodeId;
+                    failedResult.success = false;
+                    if (failedResult.errorMessage.isEmpty()) {
+                        failedResult.errorMessage = loopExecutionResult.errorMessage;
+                    }
+                    return failedResult;
+                }
+                return nodeTaskRunner.execute(request);
+            }();
 
             publishThreadTrace(request.nodeId, QStringLiteral("Node worker thread finished"));
 
             QMutexLocker locker(&mutex);
             runState.recordNodeResult(request.nodeId, nodeResult);
+            if (!isLoopNode) {
+                runState.appendDebugOutput(request.nodeId, nodeResult.stdoutText);
+            }
             runState.decrementActiveTasks();
 
-            if (m_cancellationState.isCancelRequested()) {
+            if (isRunCancelRequested()) {
                 if (nodeResult.errorMessage.isEmpty()) {
                     nodeResult.errorMessage = "Run was cancelled.";
                 }
@@ -194,17 +527,55 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
             }
 
             if (!nodeResult.success) {
+                if (isLoopNode) {
+                    runState.appendDebugOutputs(loopExecutionResult.debugOutputs);
+                    const auto bodyNodeId = loopBodyByLoopNodeId.value(request.nodeId);
+                    if (!loopExecutionResult.bodyResult.nodeId.isEmpty()) {
+                        runState.recordNodeResult(bodyNodeId, loopExecutionResult.bodyResult);
+                        if (schedulingPolicy.canStillBeScheduled(runState.nodeStatus(bodyNodeId))) {
+                            runState.finishNode(bodyNodeId, statusForFailedNodeResult(loopExecutionResult.bodyResult));
+                        }
+                    }
+                }
                 const auto failureStatus = statusForFailedNodeResult(nodeResult);
                 runState.appendError(nodeResult.errorMessage);
-                finishOneLocked(request.nodeId, failureStatus);
+                if (isLoopNode) {
+                    runState.finishNode(request.nodeId, failureStatus);
+                } else {
+                    finishOneLocked(request.nodeId, failureStatus);
+                }
                 m_eventBus.publishNodeError(result.runId, request.nodeId, nodeResult.errorMessage);
                 skipDescendantsLocked(request.nodeId);
                 maybeFinishLocked();
                 return;
             }
 
+            if (isLoopNode) {
+                const auto bodyNodeId = loopBodyByLoopNodeId.value(request.nodeId);
+                runState.appendDebugOutputs(loopExecutionResult.debugOutputs);
+                runState.finishNode(request.nodeId, NodeStatus::Succeeded);
+                m_eventBus.publishNodeOutputReady(result.runId, request.nodeId, nodeResult.outputs);
+
+                runState.recordNodeResult(bodyNodeId, loopExecutionResult.bodyResult);
+                if (schedulingPolicy.canStillBeScheduled(runState.nodeStatus(bodyNodeId))) {
+                    runState.finishNode(bodyNodeId, NodeStatus::Succeeded);
+                }
+                m_eventBus.publishNodeOutputReady(result.runId, bodyNodeId, loopExecutionResult.bodyResult.outputs);
+
+                const auto routedOutputs = outputRouter.route(bodyNodeId, indexes, loopExecutionResult.bodyResult);
+                for (const auto& packet : routedOutputs.packets) {
+                    runState.completedEdgeData().insert(packet.edgeId, packet);
+                }
+                for (const auto& downstreamNodeId : routedOutputs.downstreamNodeIds) {
+                    scheduleIfReadyLocked(downstreamNodeId);
+                }
+                maybeFinishLocked();
+                return;
+            }
+
             finishOneLocked(request.nodeId, NodeStatus::Succeeded);
             m_eventBus.publishNodeOutputReady(result.runId, request.nodeId, nodeResult.outputs);
+            waitAfterVisibleNodeStatus();
 
             const auto routedOutputs = outputRouter.route(request.nodeId, indexes, nodeResult);
             for (const auto& packet : routedOutputs.packets) {
@@ -229,7 +600,10 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
         m_eventBus.publishWorkflowStatusChanged(result.runId, WorkflowStatus::Running);
 
         for (const auto& node : workflow.nodes) {
-            if (schedulingPolicy.isStarterNode(node)) {
+            const bool implicitEntryNode = options.allowImplicitEntryNodes
+                && indexes.incomingEdgesByNode.value(node.nodeId).isEmpty();
+            if (!loopBodyNodeIds.contains(node.nodeId)
+                && (schedulingPolicy.isTopLevelEntryNode(node) || implicitEntryNode)) {
                 scheduleIfReadyLocked(node.nodeId);
             }
         }
@@ -262,9 +636,28 @@ void ExecutionEngine::runWorkflowAsync(
     QObject* receiver,
     std::function<void(WorkflowExecutionResult)> onFinished)
 {
+    runWorkflowAsync(
+        workflow,
+        WorkflowRunOptions{},
+        workspacePath,
+        runPath,
+        artifactPath,
+        receiver,
+        std::move(onFinished));
+}
+
+void ExecutionEngine::runWorkflowAsync(
+    const domain::Workflow& workflow,
+    const WorkflowRunOptions& options,
+    const QString& workspacePath,
+    const QString& runPath,
+    const QString& artifactPath,
+    QObject* receiver,
+    std::function<void(WorkflowExecutionResult)> onFinished)
+{
     QPointer<QObject> guardedReceiver(receiver);
-    m_runPool.start(QRunnable::create([this, workflow, workspacePath, runPath, artifactPath, guardedReceiver, onFinished = std::move(onFinished)]() mutable {
-        auto result = runWorkflow(workflow, workspacePath, runPath, artifactPath);
+    m_runPool.start(QRunnable::create([this, workflow, options, workspacePath, runPath, artifactPath, guardedReceiver, onFinished = std::move(onFinished)]() mutable {
+        auto result = runWorkflow(workflow, options, workspacePath, runPath, artifactPath);
         if (guardedReceiver.isNull()) {
             return;
         }

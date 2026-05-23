@@ -3,6 +3,7 @@
 #include "application/RunService.h"
 #include "domain/Workflow.h"
 #include "execution/WorkflowExecutionResult.h"
+#include "execution/WorkflowRunOptions.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -52,6 +53,14 @@ public:
     QList<application::RunListEntry> recentRunEntries() const;
     void runWorkflowAsync(
         const domain::Workflow& workflow,
+        const QString& workspacePath,
+        const QString& runPath,
+        const QString& artifactPath,
+        QObject* receiver,
+        std::function<void(execution::WorkflowExecutionResult)> onFinished);
+    void runWorkflowAsync(
+        const domain::Workflow& workflow,
+        const execution::WorkflowRunOptions& options,
         const QString& workspacePath,
         const QString& runPath,
         const QString& artifactPath,

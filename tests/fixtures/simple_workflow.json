@@ -65,8 +65,10 @@
       "edge_id": "edge-a-b",
       "from_node": "node-a",
       "from_port": "output",
+      "from_slot": 0,
       "to_node": "node-b",
-      "to_port": "input"
+      "to_port": "input",
+      "to_slot": 0
     }
   ],
   "created_at": "2026-05-07T00:00:00Z",

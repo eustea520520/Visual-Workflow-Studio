@@ -25,6 +25,18 @@ public:
         application::WorkflowDocument::ChangeState state = application::WorkflowDocument::ChangeState::Clean);
     void updateCurrentWorkflowFromView(const domain::Workflow& workflow);
     void clearCurrentWorkflow();
+    void cacheCurrentWorkflowDocument();
+    bool hasOpenWorkflowDocument(const QString& workflowId) const;
+    bool openWorkflowSnapshot(const QString& workflowId, domain::Workflow* workflow) const;
+    void replaceOpenWorkflowDocument(
+        const domain::Workflow& workflow,
+        application::WorkflowDocument::ChangeState state = application::WorkflowDocument::ChangeState::Clean);
+    bool activateOpenWorkflowDocument(const QString& workflowId);
+    void removeOpenWorkflowDocument(const QString& workflowId);
+    void markCurrentWorkflowSaved();
+    void cacheWorkflowHistory(const QString& workflowId, const application::WorkflowHistory& history);
+    bool workflowHistory(const QString& workflowId, application::WorkflowHistory* history) const;
+    void removeWorkflowHistory(const QString& workflowId);
 
     bool& workflowRunning();
     bool workflowRunning() const;

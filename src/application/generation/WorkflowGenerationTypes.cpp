@@ -68,6 +68,7 @@ QJsonObject WorkflowSkeletonNode::toJson() const
         {"output_contract", outputContract},
         {"expected_input_dimension", expectedInputDimension},
         {"expected_output_dimension", expectedOutputDimension},
+        {"loop_iterations", loopIterations},
         {"input_items", stringListToJson(inputItems)},
         {"output_items", stringListToJson(outputItems)},
         {"depends_on_node_ids", stringListToJson(dependsOnNodeIds)},
@@ -90,6 +91,7 @@ WorkflowSkeletonNode WorkflowSkeletonNode::fromJson(const QJsonObject& object)
         ? object.value("expected_input_dimension").toInt(1)
         : (node.type == QStringLiteral("starter") ? 0 : 1);
     node.expectedOutputDimension = object.value("expected_output_dimension").toInt(1);
+    node.loopIterations = object.value("loop_iterations").toInt(0);
     node.inputItems = stringListFromJson(object.value("input_items").toArray());
     node.outputItems = stringListFromJson(object.value("output_items").toArray());
     node.dependsOnNodeIds = stringListFromJson(object.value("depends_on_node_ids").toArray());

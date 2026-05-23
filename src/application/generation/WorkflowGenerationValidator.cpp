@@ -29,6 +29,17 @@ int portDimension(const QList<domain::PortDimensionSpec>& specs, const QString& 
     return 1;
 }
 
+bool isStarterNode(const domain::Node& node)
+{
+    return node.type.trimmed().toLower() == domain::NodeTypes::Starter;
+}
+
+bool isZeroInputSubsystemNode(const domain::Node& node)
+{
+    return node.type.trimmed().toLower() == domain::NodeTypes::Subsystem
+        && node.inputPorts.isEmpty();
+}
+
 QHash<QString, const domain::Node*> nodeIndex(const domain::Workflow& workflow)
 {
     QHash<QString, const domain::Node*> index;
@@ -85,6 +96,45 @@ bool hasCycleFrom(const QString& nodeId, const QHash<QString, QStringList>& adja
     return false;
 }
 
+QStringList validateLoopNodes(const domain::Workflow& workflow)
+{
+    QStringList errors;
+    QHash<QString, domain::Node> nodes;
+    QHash<QString, QStringList> adjacency;
+    QHash<QString, QStringList> reverseAdjacency;
+    for (const auto& node : workflow.nodes) {
+        nodes.insert(node.nodeId, node);
+        adjacency.insert(node.nodeId, {});
+        reverseAdjacency.insert(node.nodeId, {});
+    }
+    for (const auto& edge : workflow.edges) {
+        adjacency[edge.fromNode].append(edge.toNode);
+        reverseAdjacency[edge.toNode].append(edge.fromNode);
+    }
+
+    for (const auto& node : workflow.nodes) {
+        if (node.type.trimmed().toLower() != domain::NodeTypes::Loop) {
+            continue;
+        }
+        const auto bodyNodes = adjacency.value(node.nodeId);
+        if (bodyNodes.size() != 1) {
+            errors.append(QStringLiteral("Loop node %1 must connect to exactly one direct body node.").arg(node.nodeId));
+            continue;
+        }
+        const auto bodyNodeId = bodyNodes.first();
+        if (nodes.value(bodyNodeId).type.trimmed().toLower() == domain::NodeTypes::Loop) {
+            errors.append(QStringLiteral("Loop node %1 cannot use another Loop node as its direct body node.").arg(node.nodeId));
+        }
+        for (const auto& parentId : reverseAdjacency.value(bodyNodeId)) {
+            if (parentId != node.nodeId) {
+                errors.append(QStringLiteral("Loop body node %1 cannot receive input from node %2.")
+                    .arg(bodyNodeId, parentId));
+            }
+        }
+    }
+    return errors;
+}
+
 } // namespace
 
 WorkflowGenerationValidationResult WorkflowGenerationValidator::validateJsonText(const QString& jsonText) const
@@ -123,6 +173,11 @@ WorkflowGenerationValidationResult WorkflowGenerationValidator::validateWorkflow
     if (result.valid) {
         validateGraph(workflow, result);
     }
+    if (result.valid) {
+        for (const auto& error : validateLoopNodes(workflow)) {
+            result.addError(error);
+        }
+    }
     validatePythonCode(workflow, result);
     return result;
 }
@@ -151,7 +206,7 @@ void WorkflowGenerationValidator::validateNodes(const domain::Workflow& workflow
 
     const QRegularExpression idPattern(QStringLiteral("^[a-z0-9_-]+$"));
     QSet<QString> seenNodeIds;
-    bool hasStarter = false;
+    bool hasTopLevelEntry = false;
     for (const auto& node : workflow.nodes) {
         if (node.nodeId.trimmed().isEmpty()) {
             result.addError(QStringLiteral("Node id must not be empty."));
@@ -166,19 +221,33 @@ void WorkflowGenerationValidator::validateNodes(const domain::Workflow& workflow
         seenNodeIds.insert(node.nodeId);
 
         const auto type = node.type.trimmed().toLower();
-        if (type != domain::NodeTypes::Starter && type != domain::NodeTypes::Function && type != domain::NodeTypes::Agent) {
+        if (type != domain::NodeTypes::Starter
+            && type != domain::NodeTypes::Function
+            && type != domain::NodeTypes::Agent
+            && type != domain::NodeTypes::Subsystem
+            && type != domain::NodeTypes::Loop) {
             result.addError(QStringLiteral("Node %1 has invalid type: %2").arg(node.nodeId, node.type));
         }
 
         if (type == domain::NodeTypes::Starter) {
-            hasStarter = true;
+            hasTopLevelEntry = true;
             if (!node.inputPorts.isEmpty()) {
                 result.addError(QStringLiteral("Starter node %1 must not define input ports.").arg(node.nodeId));
             }
             if (!containsPort(node.outputPorts, QStringLiteral("output"))) {
                 result.addError(QStringLiteral("Starter node %1 must define output port output.").arg(node.nodeId));
             }
-        } else {
+        } else if (type == domain::NodeTypes::Loop) {
+            if (!containsPort(node.inputPorts, QStringLiteral("input"))) {
+                result.addError(QStringLiteral("Loop node %1 must define input port input.").arg(node.nodeId));
+            }
+            if (!containsPort(node.outputPorts, QStringLiteral("output"))) {
+                result.addError(QStringLiteral("Loop node %1 must define output port output.").arg(node.nodeId));
+            }
+            if (node.config.value(domain::NodeConfigKeys::LoopIterations).toInt(0) < 1) {
+                result.addError(QStringLiteral("Loop node %1 must define positive loop_iterations.").arg(node.nodeId));
+            }
+        } else if (type != domain::NodeTypes::Subsystem) {
             if (!containsPort(node.inputPorts, QStringLiteral("input"))) {
                 result.addError(QStringLiteral("Node %1 must define input port input.").arg(node.nodeId));
             }
@@ -186,10 +255,13 @@ void WorkflowGenerationValidator::validateNodes(const domain::Workflow& workflow
                 result.addError(QStringLiteral("Node %1 must define output port output.").arg(node.nodeId));
             }
         }
+        if (isZeroInputSubsystemNode(node)) {
+            hasTopLevelEntry = true;
+        }
     }
 
-    if (!hasStarter) {
-        result.addError(QStringLiteral("Workflow must contain at least one Starter node."));
+    if (!hasTopLevelEntry) {
+        result.addError(QStringLiteral("Workflow must contain at least one Starter node or zero-input Subsystem node."));
     }
 }
 
@@ -198,8 +270,6 @@ void WorkflowGenerationValidator::validateEdges(const domain::Workflow& workflow
     const auto index = nodeIndex(workflow);
     QSet<QString> seenEdgeIds;
     QHash<QString, QStringList> targetSlotWriters;
-    QHash<QString, bool> targetPortHasWholeEdge;
-    QHash<QString, bool> targetPortHasSlotEdge;
     const QRegularExpression idPattern(QStringLiteral("^[a-z0-9_-]+$"));
     for (const auto& edge : workflow.edges) {
         if (edge.edgeId.trimmed().isEmpty()) {
@@ -217,8 +287,8 @@ void WorkflowGenerationValidator::validateEdges(const domain::Workflow& workflow
             result.addError(QStringLiteral("Edge %1 references missing from_node: %2").arg(edge.edgeId, edge.fromNode));
         } else if (!containsPort(fromNode->outputPorts, edge.fromPort)) {
             result.addError(QStringLiteral("Edge %1 references invalid source port: %2").arg(edge.edgeId, edge.fromPort));
-        } else if (edge.fromSlot < -1) {
-            result.addError(QStringLiteral("Edge %1 from_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.fromSlot < 0) {
+            result.addError(QStringLiteral("Edge %1 from_slot must be 0 or greater.").arg(edge.edgeId));
         } else if (edge.fromSlot >= portDimension(fromNode->ioSpec.outputs, edge.fromPort)) {
             result.addError(QStringLiteral("Edge %1 from_slot is outside source output dimension.").arg(edge.edgeId));
         }
@@ -226,18 +296,14 @@ void WorkflowGenerationValidator::validateEdges(const domain::Workflow& workflow
             result.addError(QStringLiteral("Edge %1 references missing to_node: %2").arg(edge.edgeId, edge.toNode));
         } else if (!containsPort(toNode->inputPorts, edge.toPort)) {
             result.addError(QStringLiteral("Edge %1 references invalid target port: %2").arg(edge.edgeId, edge.toPort));
-        } else if (edge.toSlot < -1) {
-            result.addError(QStringLiteral("Edge %1 to_slot must be -1 or greater.").arg(edge.edgeId));
+        } else if (edge.toSlot < 0) {
+            result.addError(QStringLiteral("Edge %1 to_slot must be 0 or greater.").arg(edge.edgeId));
         } else if (edge.toSlot >= portDimension(toNode->ioSpec.inputs, edge.toPort)) {
             result.addError(QStringLiteral("Edge %1 to_slot is outside target input dimension.").arg(edge.edgeId));
         }
 
-        const auto targetPortKey = QStringLiteral("%1:%2").arg(edge.toNode, edge.toPort);
         if (edge.toSlot >= 0) {
-            targetPortHasSlotEdge.insert(targetPortKey, true);
             targetSlotWriters[QStringLiteral("%1:%2:%3").arg(edge.toNode, edge.toPort).arg(edge.toSlot)].append(edge.edgeId);
-        } else {
-            targetPortHasWholeEdge.insert(targetPortKey, true);
         }
     }
 
@@ -245,11 +311,6 @@ void WorkflowGenerationValidator::validateEdges(const domain::Workflow& workflow
         if (it.value().size() > 1) {
             result.addError(QStringLiteral("Input slot %1 is written by multiple edges: %2.")
                 .arg(it.key(), it.value().join(", ")));
-        }
-    }
-    for (auto it = targetPortHasSlotEdge.cbegin(); it != targetPortHasSlotEdge.cend(); ++it) {
-        if (it.value() && targetPortHasWholeEdge.value(it.key())) {
-            result.addError(QStringLiteral("Input port %1 mixes whole-port and slot-level edges.").arg(it.key()));
         }
     }
 }
@@ -278,13 +339,15 @@ void WorkflowGenerationValidator::validateGraph(const domain::Workflow& workflow
 
     QStringList stack;
     for (const auto& node : workflow.nodes) {
-        if (node.type == domain::NodeTypes::Starter) {
+        if (isStarterNode(node)) {
             if (indegree.value(node.nodeId) != 0) {
                 result.addError(QStringLiteral("Starter node %1 must not have incoming edges.").arg(node.nodeId));
             }
             stack.append(node.nodeId);
+        } else if (isZeroInputSubsystemNode(node)) {
+            stack.append(node.nodeId);
         } else if (indegree.value(node.nodeId) == 0) {
-            result.addError(QStringLiteral("Node %1 has no incoming edges and is not a Starter node.").arg(node.nodeId));
+            result.addError(QStringLiteral("Node %1 has no incoming edges and is not a Starter or zero-input Subsystem node.").arg(node.nodeId));
         }
     }
 
@@ -301,7 +364,7 @@ void WorkflowGenerationValidator::validateGraph(const domain::Workflow& workflow
     }
     for (const auto& node : workflow.nodes) {
         if (!reachable.contains(node.nodeId)) {
-            result.addError(QStringLiteral("Node %1 is not reachable from any Starter node.").arg(node.nodeId));
+            result.addError(QStringLiteral("Node %1 is not reachable from any Starter or zero-input Subsystem node.").arg(node.nodeId));
         }
     }
 }
@@ -309,6 +372,9 @@ void WorkflowGenerationValidator::validateGraph(const domain::Workflow& workflow
 void WorkflowGenerationValidator::validatePythonCode(const domain::Workflow& workflow, WorkflowGenerationValidationResult& result) const
 {
     for (const auto& node : workflow.nodes) {
+        if (node.type == domain::NodeTypes::Subsystem) {
+            continue;
+        }
         const auto code = node.config.value(domain::NodeConfigKeys::Code).toString();
         if (!code.contains("def run(")) {
             result.addError(QStringLiteral("Node %1 Python code must define def run(inputs, context):").arg(node.nodeId));

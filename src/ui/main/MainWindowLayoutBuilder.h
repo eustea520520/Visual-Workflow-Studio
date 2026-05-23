@@ -7,6 +7,7 @@ namespace vws::ui {
 
 class CommandBar;
 class EmptyStateOverlay;
+class CanvasHeader;
 class NodeInspector;
 class OutputPanel;
 class WorkflowCanvas;
@@ -30,6 +31,7 @@ struct MainWindowLayoutActions {
 struct MainWindowLayout {
     QWidget* centralWidget = nullptr;
     CommandBar* commandBar = nullptr;
+    CanvasHeader* canvasHeader = nullptr;
     WorkspaceExplorer* workspaceExplorer = nullptr;
     WorkflowCanvas* workflowCanvas = nullptr;
     NodeInspector* nodeInspector = nullptr;
@@ -45,7 +47,7 @@ public:
 
 private:
     CommandBar* buildCommandBar(const MainWindowLayoutActions& actions) const;
-    QWidget* buildCanvasHost(WorkflowCanvas* workflowCanvas, EmptyStateOverlay* canvasOverlay) const;
+    QWidget* buildCanvasHost(CanvasHeader* canvasHeader, WorkflowCanvas* workflowCanvas, EmptyStateOverlay* canvasOverlay) const;
 
     QWidget* m_owner = nullptr;
 };

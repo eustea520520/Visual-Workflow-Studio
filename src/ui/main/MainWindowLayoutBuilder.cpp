@@ -1,5 +1,6 @@
 #include "ui/main/MainWindowLayoutBuilder.h"
 
+#include "ui/canvas/CanvasHeader.h"
 #include "ui/canvas/WorkflowCanvas.h"
 #include "ui/inspector/NodeInspector.h"
 #include "ui/output/OutputPanel.h"
@@ -26,13 +27,14 @@ MainWindowLayout MainWindowLayoutBuilder::build(const MainWindowLayoutActions& a
 {
     MainWindowLayout layout;
     layout.commandBar = buildCommandBar(actions);
+    layout.canvasHeader = new CanvasHeader(m_owner);
     layout.workspaceExplorer = new WorkspaceExplorer(m_owner);
     layout.workflowCanvas = new WorkflowCanvas(m_owner);
     layout.nodeInspector = new NodeInspector(m_owner);
     layout.outputPanel = new OutputPanel(m_owner);
     layout.canvasOverlay = new EmptyStateOverlay(m_owner);
 
-    auto* canvasHost = buildCanvasHost(layout.workflowCanvas, layout.canvasOverlay);
+    auto* canvasHost = buildCanvasHost(layout.canvasHeader, layout.workflowCanvas, layout.canvasOverlay);
 
     auto* horizontalSplitter = new QSplitter(Qt::Horizontal, m_owner);
     horizontalSplitter->setObjectName(QStringLiteral("mainHorizontalSplitter"));
@@ -67,7 +69,6 @@ MainWindowLayout MainWindowLayoutBuilder::build(const MainWindowLayoutActions& a
 CommandBar* MainWindowLayoutBuilder::buildCommandBar(const MainWindowLayoutActions& actions) const
 {
     auto* commandBar = new CommandBar(m_owner);
-    commandBar->setWorkspaceInfo(QObject::tr("Visual Workflow Studio"));
 
     commandBar->addActionButton(QIcon(":/icons/workspace-new.svg"),
         actions.newWorkspace, IconSquareButton::Role::Secondary);
@@ -100,16 +101,24 @@ CommandBar* MainWindowLayoutBuilder::buildCommandBar(const MainWindowLayoutActio
     return commandBar;
 }
 
-QWidget* MainWindowLayoutBuilder::buildCanvasHost(WorkflowCanvas* workflowCanvas, EmptyStateOverlay* canvasOverlay) const
+QWidget* MainWindowLayoutBuilder::buildCanvasHost(CanvasHeader* canvasHeader, WorkflowCanvas* workflowCanvas, EmptyStateOverlay* canvasOverlay) const
 {
     auto* canvasHost = new QWidget(m_owner);
     canvasHost->setObjectName(QStringLiteral("canvasHost"));
 
-    auto* canvasStack = new QStackedLayout(canvasHost);
+    auto* hostLayout = new QVBoxLayout(canvasHost);
+    hostLayout->setContentsMargins(0, 0, 0, 0);
+    hostLayout->setSpacing(0);
+    hostLayout->addWidget(canvasHeader);
+
+    auto* canvasStackHost = new QWidget(canvasHost);
+    canvasStackHost->setObjectName(QStringLiteral("canvasStackHost"));
+    auto* canvasStack = new QStackedLayout(canvasStackHost);
     canvasStack->setStackingMode(QStackedLayout::StackAll);
     canvasStack->setContentsMargins(0, 0, 0, 0);
     canvasStack->addWidget(workflowCanvas);
     canvasStack->addWidget(canvasOverlay);
+    hostLayout->addWidget(canvasStackHost, 1);
 
     return canvasHost;
 }

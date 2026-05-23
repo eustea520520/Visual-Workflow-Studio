@@ -10,10 +10,6 @@ namespace {
 QJsonValue extractOutputValue(const QJsonObject& outputs, const QString& fromPort, int fromSlot)
 {
     const auto portValue = outputs.contains(fromPort) ? outputs.value(fromPort) : QJsonValue(outputs);
-    if (fromSlot < 0) {
-        return portValue;
-    }
-
     if (portValue.isArray()) {
         const auto array = portValue.toArray();
         return fromSlot < array.size() ? array.at(fromSlot) : QJsonValue();

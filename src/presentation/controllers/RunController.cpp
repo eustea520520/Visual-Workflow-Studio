@@ -126,6 +126,25 @@ void RunController::runWorkflowAsync(
         std::move(onFinished));
 }
 
+void RunController::runWorkflowAsync(
+    const domain::Workflow& workflow,
+    const execution::WorkflowRunOptions& options,
+    const QString& workspacePath,
+    const QString& runPath,
+    const QString& artifactPath,
+    QObject* receiver,
+    std::function<void(execution::WorkflowExecutionResult)> onFinished)
+{
+    m_executionEngine.runWorkflowAsync(
+        workflow,
+        options,
+        workspacePath,
+        runPath,
+        artifactPath,
+        receiver,
+        std::move(onFinished));
+}
+
 bool RunController::saveRunRecord(
     const QString& workspaceRootPath,
     const QString& workspaceId,

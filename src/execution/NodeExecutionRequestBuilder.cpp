@@ -22,7 +22,8 @@ NodeExecutionRequest NodeExecutionRequestBuilder::build(
     const QString& nodeId,
     const GraphIndexes& indexes,
     const QHash<QString, DataPacket>& completedEdgeData,
-    const InputMerger& inputMerger) const
+    const InputMerger& inputMerger,
+    const QHash<QString, QJsonObject>& initialInputsByNodeId) const
 {
     const auto node = indexes.nodesById.value(nodeId);
 
@@ -31,7 +32,7 @@ NodeExecutionRequest NodeExecutionRequestBuilder::build(
     request.nodeId = node.nodeId;
     request.nodeType = node.type;
     request.nodeConfig = node.config;
-    request.inputs = inputMerger.buildInputs(nodeId, indexes, completedEdgeData);
+    request.inputs = inputMerger.buildInputs(nodeId, indexes, completedEdgeData, initialInputsByNodeId);
     request.workspacePath = m_workspacePath;
     request.runPath = m_runPath;
     request.artifactPath = m_artifactPath;

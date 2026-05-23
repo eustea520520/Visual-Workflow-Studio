@@ -3,6 +3,7 @@
 #include "application/generation/WorkflowGenerationPromptBuilder.h"
 #include "application/generation/WorkflowGenerationService.h"
 #include "application/generation/WorkflowGenerationTemplateCatalog.h"
+#include "domain/NodeTypes.h"
 #include "infrastructure/llm/LlmChatClient.h"
 #include "presentation/state/AppStore.h"
 
@@ -251,6 +252,13 @@ void WorkflowGenerationController::generateNodeAttempt(
     const auto spec = m_generationService.templateCatalog().fullSpec(node.templateId);
     if (!spec.has_value()) {
         callback({false, {}, {}, QStringLiteral("Missing template for node %1: %2").arg(node.nodeId, node.templateId), {}, sessionId});
+        return;
+    }
+    if (spec->type == domain::NodeTypes::Subsystem) {
+        session.implementationsByNodeId.insert(node.nodeId, application::NodeImplementation{});
+        m_sessions.insert(sessionId, session);
+        onProgress(QStringLiteral("Skipping code generation for non-Python node: %1").arg(node.name));
+        generateNodeAtIndex(provider, sessionId, receiver, std::move(onProgress), std::move(callback), nodeIndex + 1);
         return;
     }
 

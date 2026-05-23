@@ -45,6 +45,52 @@ void setIoDimension(vws::domain::Node& node, int inputDimension, int outputDimen
     }
 }
 
+vws::domain::Node makeNode(const QString& id, const QString& type, QStringList inputs, QStringList outputs)
+{
+    vws::domain::Node node;
+    node.nodeId = id;
+    node.name = id;
+    node.type = type;
+    node.inputPorts = std::move(inputs);
+    node.outputPorts = std::move(outputs);
+    return node;
+}
+
+vws::domain::Edge makeEdge(
+    const QString& id,
+    const QString& from,
+    const QString& fromPort,
+    const QString& to,
+    const QString& toPort)
+{
+    vws::domain::Edge edge;
+    edge.edgeId = id;
+    edge.fromNode = from;
+    edge.fromPort = fromPort;
+    edge.toNode = to;
+    edge.toPort = toPort;
+    return edge;
+}
+
+vws::domain::Workflow makeValidLoopWorkflow()
+{
+    vws::domain::Workflow workflow;
+    workflow.workflowId = "loop-workflow";
+    workflow.workspaceId = "workspace";
+    auto starter = makeNode("starter", "starter", {}, {"output"});
+    auto loop = makeNode("loop", "loop", {"input"}, {"output"});
+    loop.config.insert("loop_iterations", 3);
+    auto body = makeNode("body", "function", {"input"}, {"output"});
+    auto sink = makeNode("sink", "function", {"input"}, {"output"});
+    workflow.nodes = {starter, loop, body, sink};
+    workflow.edges = {
+        makeEdge("edge-starter-loop", "starter", "output", "loop", "input"),
+        makeEdge("edge-loop-body", "loop", "output", "body", "input"),
+        makeEdge("edge-body-sink", "body", "output", "sink", "input"),
+    };
+    return workflow;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -98,6 +144,23 @@ int main(int argc, char* argv[])
     if (const auto result = expect(!noStarterResult.valid, "Workflow without a Starter node should be invalid")) {
         return result;
     }
+    const auto subsystemNoStarterResult = validator.validate(
+        noStarterWorkflow,
+        vws::execution::GraphValidationMode::SubsystemWorkflow);
+    if (const auto result = expect(subsystemNoStarterResult.valid,
+            "Subsystem workflow should allow implicit entry nodes without a Starter node")) {
+        return result;
+    }
+
+    auto zeroInputSubsystemWorkflow = simpleWorkflow;
+    zeroInputSubsystemWorkflow.nodes[0].type = "subsystem";
+    zeroInputSubsystemWorkflow.nodes[0].inputPorts.clear();
+    zeroInputSubsystemWorkflow.nodes[0].outputPorts = {"output"};
+    const auto zeroInputSubsystemResult = validator.validate(zeroInputSubsystemWorkflow);
+    if (const auto result = expect(zeroInputSubsystemResult.valid,
+            "Top-level workflow should allow a zero-input Subsystem node as a graph entry")) {
+        return result;
+    }
 
     auto starterIncomingWorkflow = simpleWorkflow;
     vws::domain::Edge incomingStarterEdge;
@@ -146,6 +209,13 @@ int main(int argc, char* argv[])
     if (const auto result = expect(!cyclicResult.valid, "Cycle should be invalid")) {
         return result;
     }
+    const auto subsystemCyclicResult = validator.validate(
+        cyclicWorkflow,
+        vws::execution::GraphValidationMode::SubsystemWorkflow);
+    if (const auto result = expect(!subsystemCyclicResult.valid,
+            "Subsystem workflow should still reject cycles")) {
+        return result;
+    }
 
     auto slotWorkflow = simpleWorkflow;
     setIoDimension(slotWorkflow.nodes[0], 1, 3);
@@ -173,14 +243,56 @@ int main(int argc, char* argv[])
         return result;
     }
 
-    auto mixedPortWorkflow = slotWorkflow;
-    auto wholePortEdge = mixedPortWorkflow.edges[0];
-    wholePortEdge.edgeId = "edge-whole-port";
-    wholePortEdge.fromSlot = -1;
-    wholePortEdge.toSlot = -1;
-    mixedPortWorkflow.edges.append(wholePortEdge);
-    const auto mixedPortResult = validator.validate(mixedPortWorkflow);
-    if (const auto result = expect(!mixedPortResult.valid, "Whole-port and slot-level edges on one input port should not mix")) {
+    auto negativeSlotWorkflow = slotWorkflow;
+    negativeSlotWorkflow.edges[0].fromSlot = -1;
+    const auto negativeSlotResult = validator.validate(negativeSlotWorkflow);
+    if (const auto result = expect(!negativeSlotResult.valid, "Negative edge slots should be invalid")) {
+        return result;
+    }
+
+    const auto validLoopResult = validator.validate(makeValidLoopWorkflow());
+    if (const auto result = expect(validLoopResult.valid,
+            QString("Valid single Loop workflow should pass: %1").arg(validLoopResult.errors.join("; ")))) {
+        return result;
+    }
+
+    auto noBodyLoop = makeValidLoopWorkflow();
+    noBodyLoop.edges.removeAt(1);
+    const auto noBodyLoopResult = validator.validate(noBodyLoop);
+    if (const auto result = expect(!noBodyLoopResult.valid, "Loop without a direct body node should be invalid")) {
+        return result;
+    }
+
+    auto missingMaxLoop = makeValidLoopWorkflow();
+    missingMaxLoop.nodes[1].config.remove("loop_iterations");
+    const auto missingMaxLoopResult = validator.validate(missingMaxLoop);
+    if (const auto result = expect(!missingMaxLoopResult.valid, "Loop without loop_iterations should be invalid")) {
+        return result;
+    }
+
+    auto multiBodyLoop = makeValidLoopWorkflow();
+    multiBodyLoop.nodes.append(makeNode("body-2", "function", {"input"}, {"output"}));
+    multiBodyLoop.edges.append(makeEdge("edge-loop-body-2", "loop", "output", "body-2", "input"));
+    const auto multiBodyLoopResult = validator.validate(multiBodyLoop);
+    if (const auto result = expect(!multiBodyLoopResult.valid, "Loop with multiple direct body nodes should be invalid")) {
+        return result;
+    }
+
+    auto externalInputLoop = makeValidLoopWorkflow();
+    externalInputLoop.nodes.append(makeNode("outside", "starter", {}, {"output"}));
+    externalInputLoop.edges.append(makeEdge("edge-outside-body", "outside", "output", "body", "input"));
+    externalInputLoop.edges.last().toSlot = 1;
+    setIoDimension(externalInputLoop.nodes[2], 2, 1);
+    const auto externalInputLoopResult = validator.validate(externalInputLoop);
+    if (const auto result = expect(!externalInputLoopResult.valid, "Loop body receiving external input should be invalid")) {
+        return result;
+    }
+
+    auto nestedLoop = makeValidLoopWorkflow();
+    nestedLoop.nodes[2].type = "loop";
+    nestedLoop.nodes[2].config.insert("loop_iterations", 2);
+    const auto nestedLoopResult = validator.validate(nestedLoop);
+    if (const auto result = expect(!nestedLoopResult.valid, "Loop body cannot be another Loop node")) {
         return result;
     }
 

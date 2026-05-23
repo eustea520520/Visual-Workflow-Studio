@@ -73,8 +73,9 @@ bool WorkflowNodeImplementationValidator::validate(
                 .arg(node.nodeId));
         }
     }
+    const auto expectedOutputPort = QStringLiteral("output");
     for (const auto& output : implementation.ioSpecPatch.outputs) {
-        if (output.portName == "output" && output.dimension != node.expectedOutputDimension) {
+        if (output.portName == expectedOutputPort && output.dimension != node.expectedOutputDimension) {
             errors.append(QStringLiteral("Node %1 io_spec_patch output dimension must match skeleton expected_output_dimension.")
                 .arg(node.nodeId));
         }
@@ -85,13 +86,22 @@ bool WorkflowNodeImplementationValidator::validate(
             .arg(node.nodeId)
             .arg(node.expectedInputDimension));
     }
-    if (!implementation.code.contains(QStringLiteral("vws:output output dimension=%1").arg(node.expectedOutputDimension))) {
-        errors.append(QStringLiteral("Node %1 code must include a # vws:output output dimension=%2 comment.")
+    if (!implementation.code.contains(QStringLiteral("vws:output %1 dimension=%2")
+            .arg(expectedOutputPort)
+            .arg(node.expectedOutputDimension))) {
+        errors.append(QStringLiteral("Node %1 code must include a # vws:output %2 dimension=%3 comment.")
             .arg(node.nodeId)
+            .arg(expectedOutputPort)
             .arg(node.expectedOutputDimension));
     }
-    if (node.expectedOutputDimension > 1 && !implementation.code.contains("outputs[\"output\"]")) {
-        errors.append(QStringLiteral("Node %1 multi-output code should build outputs[\"output\"] as a list.")
+    if (node.expectedOutputDimension > 1 && !implementation.code.contains(QStringLiteral("outputs[\"%1\"]").arg(expectedOutputPort))) {
+        errors.append(QStringLiteral("Node %1 multi-output code should build outputs[\"%2\"] as a list.")
+            .arg(node.nodeId)
+            .arg(expectedOutputPort));
+    }
+    if (spec.type == NodeTypes::Loop
+        && !implementation.code.contains("context.get(\"loop\"")) {
+        errors.append(QStringLiteral("Loop node %1 code must read iteration state from context[\"loop\"].")
             .arg(node.nodeId));
     }
     if (node.expectedInputDimension > 1 && !implementation.code.contains("input_data[0]")) {

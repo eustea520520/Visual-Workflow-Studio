@@ -25,9 +25,12 @@ struct WorkflowCanvasContextAction {
         AddStarter,
         AddFunction,
         AddAgent,
+        AddSubsystem,
+        AddLoop,
         ConnectSelected,
         DeleteSelected,
         RotateSelected,
+        RetitleSubsystem,
     };
 
     Type type = Type::None;
@@ -44,7 +47,8 @@ public:
         const QPoint& globalPos,
         bool canConnectSelected,
         bool hasSelection,
-        bool canRotateSelected);
+        bool canRotateSelected,
+        bool canRetitleSubsystem);
 };
 
 } // namespace vws::ui

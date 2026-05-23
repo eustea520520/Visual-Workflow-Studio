@@ -24,6 +24,7 @@ def main() -> int:
             "request_id": "",
             "success": False,
             "outputs": {},
+            "metadata": {},
             "artifacts": [],
             "stdout": "",
             "stderr": "",

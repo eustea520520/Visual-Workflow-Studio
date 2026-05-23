@@ -39,6 +39,8 @@ public:
 
     void setWorkflow(const domain::Workflow& workflow);
     domain::Workflow workflow() const;
+    application::WorkflowHistory history() const;
+    void setHistory(const application::WorkflowHistory& history);
     std::optional<domain::Node> selectedNode() const;
 
     void addNode(const domain::Node& node);
@@ -60,6 +62,9 @@ signals:
     void starterNodeRequested(const QPointF& scenePos, StarterNodeTemplate templateKind);
     void functionNodeRequested(const QPointF& scenePos, DataTransferNodeTemplate templateKind);
     void agentNodeRequested(const QPointF& scenePos, DataTransferNodeTemplate templateKind);
+    void subsystemNodeRequested(const QPointF& scenePos);
+    void loopNodeRequested(const QPointF& scenePos);
+    void subsystemNodeRetitleRequested(const domain::Node& node);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -78,7 +83,6 @@ private:
     void rebuildSceneFromWorkflow();
     void addNodeItem(const domain::Node& node);
     void addEdgeItem(const domain::Edge& edge);
-    bool createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId);
     bool createEdgeBetween(const domain::EdgeEndpoint& source, const domain::EdgeEndpoint& target);
     void updateEdgesForNode(const QString& nodeId);
     void updateAllEdgeRoutes();

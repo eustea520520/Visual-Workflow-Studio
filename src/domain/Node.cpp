@@ -56,6 +56,27 @@ NodePosition NodePosition::fromJson(const QJsonObject& object)
     return position;
 }
 
+bool NodeSize::isValid() const
+{
+    return width > 0.0 && height > 0.0;
+}
+
+QJsonObject NodeSize::toJson() const
+{
+    return {
+        {"width", width},
+        {"height", height},
+    };
+}
+
+NodeSize NodeSize::fromJson(const QJsonObject& object)
+{
+    NodeSize size;
+    size.width = object.value("width").toDouble();
+    size.height = object.value("height").toDouble();
+    return size;
+}
+
 QJsonObject NodeRuntime::toJson() const
 {
     return {
@@ -85,6 +106,9 @@ QJsonObject Node::toJson() const
     object.insert("name", name);
     object.insert("description", description);
     object.insert("position", position.toJson());
+    if (size.isValid()) {
+        object.insert("size", size.toJson());
+    }
     object.insert("rotation_degrees", normalizeRotation(rotationDegrees));
     object.insert("input_ports", stringListToJson(inputPorts));
     object.insert("output_ports", stringListToJson(outputPorts));
@@ -103,6 +127,7 @@ Node Node::fromJson(const QJsonObject& object)
     node.name = object.value("name").toString();
     node.description = object.value("description").toString();
     node.position = NodePosition::fromJson(object.value("position").toObject());
+    node.size = NodeSize::fromJson(object.value("size").toObject());
     node.rotationDegrees = normalizeRotation(object.value("rotation_degrees").toInt(0));
     node.inputPorts = stringListFromJson(object.value("input_ports").toArray());
     node.outputPorts = stringListFromJson(object.value("output_ports").toArray());

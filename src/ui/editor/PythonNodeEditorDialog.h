@@ -49,6 +49,7 @@ private:
     void buildAgentSettings(QVBoxLayout* layout);
     void loadAgentTemplate();
     QJsonObject agentConfigPatch() const;
+    QJsonObject loopConfigPatch() const;
     QString agentUrl() const;
     QString agentModel() const;
     QString agentApiKey() const;
@@ -56,7 +57,9 @@ private:
     QString agentTaskPrompt() const;
     QString outputFileName() const;
     int agentMaxRetries() const;
+    int loopIterations() const;
     bool validateAgentMaxRetries(QString* errorMessage = nullptr) const;
+    bool validateLoopIterations(QString* errorMessage = nullptr) const;
     bool usesOutputFileName() const;
     DataTransferTemplate currentTransferTemplate() const;
     DataTransferTemplate agentTransferTemplate() const;
@@ -74,6 +77,7 @@ private:
     QLineEdit* m_descriptionEdit = nullptr;
     QLineEdit* m_timeoutEdit = nullptr;
     QLineEdit* m_outputFileNameEdit = nullptr;
+    QLineEdit* m_loopIterationsEdit = nullptr;
     QLineEdit* m_agentUrlEdit = nullptr;
     QLineEdit* m_agentModelEdit = nullptr;
     QLineEdit* m_agentApiKeyEdit = nullptr;

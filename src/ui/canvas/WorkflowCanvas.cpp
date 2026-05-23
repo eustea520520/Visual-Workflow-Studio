@@ -1,6 +1,7 @@
 ﻿#include "ui/canvas/WorkflowCanvas.h"
 
 #include "application/WorkflowEditService.h"
+#include "domain/NodeTypes.h"
 #include "ui/canvas/EdgeGraphicsItem.h"
 #include "ui/canvas/NodePortSlotViewModelBuilder.h"
 #include "ui/canvas/WorkflowCanvasContextMenu.h"
@@ -22,6 +23,7 @@
 #include <QSet>
 #include <QSignalBlocker>
 #include <QWheelEvent>
+#include <algorithm>
 
 namespace vws::ui {
 
@@ -90,6 +92,16 @@ domain::Workflow WorkflowCanvas::workflow() const
     return workflow;
 }
 
+application::WorkflowHistory WorkflowCanvas::history() const
+{
+    return m_history;
+}
+
+void WorkflowCanvas::setHistory(const application::WorkflowHistory& history)
+{
+    m_history = history;
+}
+
 std::optional<domain::Node> WorkflowCanvas::selectedNode() const
 {
     return m_sceneController != nullptr ? m_sceneController->selectedNode() : std::nullopt;
@@ -120,24 +132,51 @@ bool WorkflowCanvas::connectSelectedNodes()
     if (selectedNodes.size() != 2) {
         return false;
     }
+    std::sort(selectedNodes.begin(), selectedNodes.end(), [](const NodeGraphicsItem* left, const NodeGraphicsItem* right) {
+        if (left == nullptr || right == nullptr) {
+            return left != nullptr;
+        }
+        const auto leftCenter = left->sceneBoundingRect().center();
+        const auto rightCenter = right->sceneBoundingRect().center();
+        if (!qFuzzyCompare(leftCenter.x(), rightCenter.x())) {
+            return leftCenter.x() < rightCenter.x();
+        }
+        return leftCenter.y() < rightCenter.y();
+    });
 
-    return createEdgeBetween(selectedNodes.at(0)->nodeId(), selectedNodes.at(1)->nodeId());
-}
-
-bool WorkflowCanvas::createEdgeBetween(const QString& sourceNodeId, const QString& targetNodeId)
-{
-    auto* sourceItem = m_sceneController != nullptr ? m_sceneController->nodeItem(sourceNodeId) : nullptr;
-    auto* targetItem = m_sceneController != nullptr ? m_sceneController->nodeItem(targetNodeId) : nullptr;
-    if (sourceItem == nullptr || targetItem == nullptr || sourceNodeId == targetNodeId) {
+    const auto* sourceItem = selectedNodes.at(0);
+    const auto* targetItem = selectedNodes.at(1);
+    const auto sourceNode = sourceItem->node();
+    const auto targetNode = targetItem->node();
+    if (sourceNode.outputPorts.isEmpty() || targetNode.inputPorts.isEmpty()) {
         return false;
     }
-    if (sourceItem->node().outputPorts.isEmpty() || targetItem->node().inputPorts.isEmpty()) {
+
+    const int connectionCount = qMin(sourceItem->outputSlotCount(), targetItem->inputSlotCount());
+    if (connectionCount <= 0) {
         return false;
     }
 
-    return createEdgeBetween(
-        domain::EdgeEndpoint{sourceNodeId, sourceItem->node().outputPorts.first(), -1},
-        domain::EdgeEndpoint{targetNodeId, targetItem->node().inputPorts.first(), -1});
+    pushUndoState();
+    bool createdAny = false;
+    for (int slotIndex = 0; slotIndex < connectionCount; ++slotIndex) {
+        domain::Edge edge;
+        if (!application::WorkflowEditService::connectNodes(
+                m_workflow,
+                domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), slotIndex},
+                domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), slotIndex},
+                edge)) {
+            continue;
+        }
+        addEdgeItem(edge);
+        createdAny = true;
+    }
+
+    if (createdAny) {
+        updateAllEdgeRoutes();
+        emit workflowChanged(workflow());
+    }
+    return createdAny;
 }
 
 bool WorkflowCanvas::createEdgeBetween(const domain::EdgeEndpoint& source, const domain::EdgeEndpoint& target)
@@ -235,12 +274,15 @@ void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
     const auto scenePos = mapToScene(event->pos());
     const auto selectedNodes = selectedNodeItems();
+    const auto canRetitleSubsystem = selectedNodes.size() == 1
+        && selectedNodes.first()->node().type.trimmed().toLower() == domain::NodeTypes::Subsystem;
     const auto action = WorkflowCanvasContextMenu::exec(
         this,
         event->globalPos(),
         m_scene->selectedItems().size() == 2,
         !m_scene->selectedItems().isEmpty(),
-        selectedNodes.size() == 1 && m_scene->selectedItems().size() == 1);
+        selectedNodes.size() == 1 && m_scene->selectedItems().size() == 1,
+        canRetitleSubsystem);
 
     switch (action.type) {
     case WorkflowCanvasContextAction::Type::AddStarter:
@@ -252,6 +294,12 @@ void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
     case WorkflowCanvasContextAction::Type::AddAgent:
         emit agentNodeRequested(scenePos, action.dataTransferTemplate);
         return;
+    case WorkflowCanvasContextAction::Type::AddSubsystem:
+        emit subsystemNodeRequested(scenePos);
+        return;
+    case WorkflowCanvasContextAction::Type::AddLoop:
+        emit loopNodeRequested(scenePos);
+        return;
     case WorkflowCanvasContextAction::Type::ConnectSelected:
         connectSelectedNodes();
         return;
@@ -260,6 +308,11 @@ void WorkflowCanvas::contextMenuEvent(QContextMenuEvent* event)
         return;
     case WorkflowCanvasContextAction::Type::RotateSelected:
         rotateSelectedNode(action.rotationDeltaDegrees);
+        return;
+    case WorkflowCanvasContextAction::Type::RetitleSubsystem:
+        if (canRetitleSubsystem) {
+            emit subsystemNodeRetitleRequested(selectedNodes.first()->node());
+        }
         return;
     case WorkflowCanvasContextAction::Type::None:
         return;
@@ -317,6 +370,13 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
 
     if (event->button() == Qt::LeftButton) {
         const auto scenePos = mapToScene(event->pos());
+        if (auto* nodeItem = dynamic_cast<NodeGraphicsItem*>(itemAt(event->pos()));
+                nodeItem != nullptr && nodeItem->isSelected() && nodeItem->hasResizeHandleAt(scenePos)) {
+            pushUndoState();
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
+
         if (auto sourceHit = outputSlotAt(scenePos); sourceHit.has_value()) {
             // 从输出端口按下时进入“拖线”模式。
             // 此时不把事件继续交给节点图元，避免节点被拖动。
@@ -679,7 +739,7 @@ void WorkflowCanvas::pasteClipboardNodes()
 
     pushUndoState();
 
-    const auto duplicate = m_clipboard.createPasteSubgraph(tr(" Copy"));
+    const auto duplicate = m_clipboard.createPasteSubgraph();
 
     if (m_sceneController != nullptr) {
         m_sceneController->clearSelection();

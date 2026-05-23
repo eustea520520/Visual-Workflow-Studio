@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/WorkflowDocument.h"
+#include "application/WorkflowHistory.h"
 #include "domain/Workspace.h"
 
 #include <QHash>
@@ -15,6 +16,8 @@ namespace vws::presentation {
 struct AppState {
     domain::Workspace currentWorkspace;
     application::WorkflowDocument workflowDocument;
+    QHash<QString, application::WorkflowDocument> openWorkflowDocumentsById;
+    QHash<QString, application::WorkflowHistory> workflowHistoriesById;
     bool workflowRunning = false;
     QHash<QString, QJsonObject> nodeOutputsByNodeId;
     QString selectedNodeId;

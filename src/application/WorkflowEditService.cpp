@@ -79,8 +79,8 @@ bool WorkflowEditService::connectNodes(
 
     return connectNodes(
         workflow,
-        domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), -1},
-        domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), -1},
+        domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), 0},
+        domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), 0},
         createdEdge);
 }
 
@@ -95,8 +95,8 @@ bool WorkflowEditService::connectNodes(
         || target.nodeId.trimmed().isEmpty()
         || source.portName.trimmed().isEmpty()
         || target.portName.trimmed().isEmpty()
-        || source.slotIndex < -1
-        || target.slotIndex < -1) {
+        || source.slotIndex < 0
+        || target.slotIndex < 0) {
         return false;
     }
 
@@ -108,6 +108,13 @@ bool WorkflowEditService::connectNodes(
     if (!containsPort(sourceNode->outputPorts, source.portName)
         || !containsPort(targetNode->inputPorts, target.portName)) {
         return false;
+    }
+    for (const auto& existingEdge : workflow.edges) {
+        if (existingEdge.toNode == target.nodeId
+            && existingEdge.toPort == target.portName
+            && existingEdge.toSlot == target.slotIndex) {
+            return false;
+        }
     }
 
     domain::Edge edge;

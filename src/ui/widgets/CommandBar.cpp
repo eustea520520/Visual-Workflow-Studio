@@ -26,19 +26,10 @@ CommandBar::CommandBar(QWidget* parent)
     // Center: stretch
     layout->addStretch(1);
 
-    // Right: workspace / workflow info
     m_workspaceLabel = new QLabel(this);
-    m_workspaceLabel->setObjectName(QStringLiteral("commandBarWorkspaceLabel"));
-
-    auto* separator_1 = new QLabel(QStringLiteral(" / "), this);
-    separator_1->setObjectName(QStringLiteral("commandBarBreadcrumbSeparator"));
-
-    m_workflowLabel = new QLabel(QStringLiteral("No workflow"), this);
-    m_workflowLabel->setObjectName(QStringLiteral("commandBarWorkflowLabel"));
-
-    layout->addWidget(m_workspaceLabel);
-    layout->addWidget(separator_1);
-    layout->addWidget(m_workflowLabel);
+    m_workspaceLabel->hide();
+    m_workflowLabel = new QLabel(this);
+    m_workflowLabel->hide();
 }
 
 void CommandBar::setWorkspaceInfo(const QString& text)

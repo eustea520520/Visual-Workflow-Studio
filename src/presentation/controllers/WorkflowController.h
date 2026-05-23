@@ -24,6 +24,8 @@ public:
     QList<domain::Workflow> listWorkflows(QString* errorMessage = nullptr) const;
     bool loadWorkflowFile(const QString& filePath, QString* errorMessage = nullptr);
     bool loadWorkflowFromWorkspace(const QString& workflowId, QString* errorMessage = nullptr);
+    bool workflowSnapshot(const QString& workflowId, domain::Workflow& workflow, QString* errorMessage = nullptr) const;
+    bool renameWorkflow(const QString& workflowId, const QString& newName, QString* errorMessage = nullptr);
     bool loadWorkflowSnapshotForRun(
         const domain::RunRecord& record,
         domain::Workflow& workflowSnapshot,

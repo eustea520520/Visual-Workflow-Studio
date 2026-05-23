@@ -18,6 +18,7 @@ public:
 
     void publishWorkflowStatusChanged(const QString& runId, WorkflowStatus status);
     void publishNodeStatusChanged(const QString& runId, const QString& nodeId, NodeStatus status);
+    void publishNodeStatusText(const QString& runId, const QString& nodeId, const QString& status);
     void publishNodeOutputReady(const QString& runId, const QString& nodeId, const QJsonObject& outputs);
     void publishNodeError(const QString& runId, const QString& nodeId, const QString& message);
     void publishThreadTrace(

@@ -47,9 +47,12 @@ def execute_user_code(request: dict[str, Any]) -> dict[str, Any]:
             raise TypeError("entry function must return a dict")
 
         outputs = user_result.get("outputs", {})
+        metadata = user_result.get("metadata", {})
         artifacts = user_result.get("artifacts", [])
         if not isinstance(outputs, dict):
             raise TypeError("result['outputs'] must be a dict")
+        if not isinstance(metadata, dict):
+            raise TypeError("result['metadata'] must be a dict")
         if not isinstance(artifacts, list):
             raise TypeError("result['artifacts'] must be a list")
 
@@ -57,6 +60,7 @@ def execute_user_code(request: dict[str, Any]) -> dict[str, Any]:
             "request_id": request_id,
             "success": True,
             "outputs": outputs,
+            "metadata": metadata,
             "artifacts": artifacts,
             "stdout": stdout_buffer.getvalue(),
             "stderr": stderr_buffer.getvalue(),
@@ -68,6 +72,7 @@ def execute_user_code(request: dict[str, Any]) -> dict[str, Any]:
             "request_id": request_id,
             "success": False,
             "outputs": {},
+            "metadata": {},
             "artifacts": [],
             "stdout": stdout_buffer.getvalue(),
             "stderr": stderr_buffer.getvalue(),

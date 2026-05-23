@@ -5,6 +5,8 @@
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
 
+#include <QJsonArray>
+
 namespace vws::application {
 
 namespace ConfigKeys = domain::NodeConfigKeys;
@@ -44,18 +46,44 @@ QJsonObject agentConfig(const QString& ioTemplate, const QString& code)
     return config;
 }
 
+QJsonObject subsystemConfig()
+{
+    return {
+        {ConfigKeys::SubsystemSchemaVersion, 1},
+        {ConfigKeys::SubsystemBoundary, QJsonObject{{"inputs", QJsonArray{}}, {"outputs", QJsonArray{}}}},
+    };
+}
+
+QJsonObject loopConfig(const QString& code)
+{
+    auto config = pythonConfig(QStringLiteral("loop"), code);
+    config.insert(ConfigKeys::LoopIterations, 1);
+    return config;
+}
+
 QString baseInstructions()
 {
     return QStringLiteral(
-        "Strictly follow the current code_template. "
+        "Strictly follow the current code_template and current VWS slot IO contract. "
         "The generated Python code must define exactly def run(inputs, context):. "
         "Keep # vws:input/# vws:output comments and set their dimensions/labels to match the skeleton. "
-        "If dimension=1, inputs.get(\"input\", {}) is usually a dict. "
-        "If dimension>1, inputs.get(\"input\", []) is a list and code must read input_data[0], input_data[1], etc. "
-        "If output dimension>1, outputs.output must be a list with exactly that many items. "
-        "Return {\"outputs\": {\"output\": <json-serializable value>}, \"artifacts\": []}. "
+        "inputs.get(\"input\", []) is always a slot list and code must read input_data[0], input_data[1], etc. "
+        "outputs[\"output\"] must always be a slot list with exactly the output dimension count, even for dimension=1. "
+        "Return {\"outputs\": {\"output\": [<slot values>]}, \"artifacts\": []}. "
+        "Never return a bare dict as outputs[\"output\"]. "
         "Do not wrap code in markdown fences. Do not include secrets. "
         "Do not use subprocess, os.system, eval, exec, socket, or destructive file deletion.");
+}
+
+QString loopInstructions()
+{
+    return QStringLiteral(
+        "Loop is a Python-backed node that runs once per iteration and feeds exactly one direct body node. "
+        "Its upstream inputs[\"input\"] slot list is captured once and remains unchanged for every iteration. "
+        "Read iteration data from context.get(\"loop\", {}), never from inputs. "
+        "The Loop node must keep only business data in outputs[\"output\"] as a list; loop metadata stays in context/metadata. "
+        "A Loop node must have exactly one direct downstream body node. "
+        "Use a Subsystem as the direct body node when the loop body has multiple steps.");
 }
 
 QString fileOutputInstructions()
@@ -63,16 +91,16 @@ QString fileOutputInstructions()
     return QStringLiteral(
         "For file output, write under context.get(\"artifact_path\") or context.get(\"run_path\"). "
         "Keep the editable assignment line output_file_path = \"output.csv\" and derive output_path from it. "
-        "Return outputs.output.file_path, outputs.output.format, and register the file in artifacts. "
+        "Return outputs[\"output\"] as a list containing a file descriptor object with file_path, format, and size_bytes; register the file in artifacts too. "
         "Prefer CSV for tabular outputs unless the user explicitly asks for another type.");
 }
 
 QString fileInputInstructions()
 {
     return QStringLiteral(
-        "For file input, support both single-input dict and multi-input list shapes. "
-        "Use file_input = input_data[0] if isinstance(input_data, list) and input_data else input_data, "
-        "then read file_input.get(\"file_path\", \"\").");
+        "For file input, use the slot list shape. "
+        "Use file_input = input_data[0] if input_data else {}, "
+        "then read file_input.get(\"file_path\", \"\"). If multiple file input slots are requested, read input_data[1], input_data[2], etc. explicitly.");
 }
 
 QString agentInstructions()
@@ -80,6 +108,7 @@ QString agentInstructions()
     return QStringLiteral(
         "Agent code is still Python code. Keep editable assignment lines base_url, model_name, api_key, "
         "max_retries, background_prompt, and task_prompt because UI fields update those lines by regex. "
+        "Agent input/output data still uses inputs[\"input\"] and outputs[\"output\"] lists exactly like Function nodes. "
         "config_patch may include agent_background_prompt, agent_task_prompt, agent_model, agent_url, agent_max_retries. "
         "agent_api_key must be empty or absent.");
 }
@@ -126,35 +155,36 @@ QList<NodeTemplateFullSpec> WorkflowGenerationTemplateCatalog::fullSpecs() const
     const auto dataToFileCode = PythonCodeTemplates::functionDataToFileCode();
     const auto fileToDataCode = PythonCodeTemplates::functionFileToDataCode();
     const auto fileToFileCode = PythonCodeTemplates::functionFileToFileCode();
+    const auto loopCode = PythonCodeTemplates::loopCode();
 
     return {
         makeSpec("starter_empty_output", NodeTypes::Starter, "Starter Empty Output",
-            "Start the workflow and emit an empty output object.", "starter_empty_output",
+            "Start the workflow without upstream input and emit one empty business object as outputs.output[0].", "starter_empty_output",
             {}, {"output"}, pythonConfig("starter_empty_output", emptyCode), emptyCode,
-            baseInstructions() + " Starter nodes must ignore upstream inputs."),
+            baseInstructions() + " Starter nodes must ignore upstream inputs and must not create # vws:input comments."),
         makeSpec("starter_data_output", NodeTypes::Starter, "Starter Data Output",
-            "Create initial small JSON business data.", "starter_data_output",
+            "Start the workflow and create initial small JSON business data as outputs.output slot values.", "starter_data_output",
             {}, {"output"}, pythonConfig("starter_data_output", starterDataCode), starterDataCode,
-            baseInstructions() + " Starter nodes must create outputs.output from scratch."),
+            baseInstructions() + " Starter nodes must create outputs[\"output\"] from scratch and must not read inputs."),
         makeSpec("starter_file_output", NodeTypes::Starter, "Starter File Output",
-            "Create an initial file artifact and pass its path downstream.", "starter_file_output",
+            "Start the workflow, create a CSV/file artifact, and pass its file descriptor downstream as outputs.output[0].", "starter_file_output",
             {}, {"output"}, pythonConfig("starter_file_output", starterFileCode), starterFileCode,
-            baseInstructions() + " " + fileOutputInstructions()),
+            baseInstructions() + " Starter nodes must not read inputs. " + fileOutputInstructions()),
 
         makeSpec("data_to_data", NodeTypes::Function, "Function Data to Data",
-            "Transform structured input data into structured output data.", "data_to_data",
+            "Read JSON-compatible slot data from inputs.input and return JSON-compatible slot data.", "data_to_data",
             {"input"}, {"output"}, pythonConfig("data_to_data", dataToDataCode), dataToDataCode,
-            baseInstructions() + " Read upstream data from inputs.get(\"input\", {})."),
+            baseInstructions() + " Read upstream data from input_data[0], input_data[1], etc. according to expected_input_dimension."),
         makeSpec("data_to_file", NodeTypes::Function, "Function Data to File",
-            "Transform structured input data into a file artifact.", "data_to_file",
+            "Read JSON-compatible slot data and write a CSV/file artifact descriptor downstream.", "data_to_file",
             {"input"}, {"output"}, pythonConfig("data_to_file", dataToFileCode), dataToFileCode,
-            baseInstructions() + " Read upstream data from inputs.get(\"input\", {}). " + fileOutputInstructions()),
+            baseInstructions() + " Read upstream data from input_data[0], input_data[1], etc. " + fileOutputInstructions()),
         makeSpec("file_to_data", NodeTypes::Function, "Function File to Data",
-            "Read an upstream file path and return extracted structured data.", "file_to_data",
+            "Read an upstream file descriptor object, open the file, and return extracted JSON-compatible data.", "file_to_data",
             {"input"}, {"output"}, pythonConfig("file_to_data", fileToDataCode), fileToDataCode,
             baseInstructions() + " " + fileInputInstructions()),
         makeSpec("file_to_file", NodeTypes::Function, "Function File to File",
-            "Read an upstream file and produce another file artifact.", "file_to_file",
+            "Read an upstream file descriptor object and produce another CSV/file artifact descriptor.", "file_to_file",
             {"input"}, {"output"}, pythonConfig("file_to_file", fileToFileCode), fileToFileCode,
             baseInstructions() + " " + fileInputInstructions() + " " + fileOutputInstructions()),
 
@@ -178,6 +208,15 @@ QList<NodeTemplateFullSpec> WorkflowGenerationTemplateCatalog::fullSpecs() const
             {"input"}, {"output"}, agentConfig("file_to_file", PythonCodeTemplates::agentCode({}, {}, {}, PythonCodeTemplates::defaultAgentMaxRetries(), PythonCodeTemplates::defaultAgentBackgroundPrompt(), PythonCodeTemplates::defaultAgentTaskPrompt(), DataTransferTemplate::FileToFile)),
             PythonCodeTemplates::agentCode({}, {}, {}, PythonCodeTemplates::defaultAgentMaxRetries(), PythonCodeTemplates::defaultAgentBackgroundPrompt(), PythonCodeTemplates::defaultAgentTaskPrompt(), DataTransferTemplate::FileToFile),
             baseInstructions() + " " + agentInstructions() + " " + fileInputInstructions() + " " + fileOutputInstructions()),
+        makeSpec("subsystem_basic", NodeTypes::Subsystem, "Subsystem",
+            "A nested workflow node used to group a multi-step sub-process inside one node; use it as the body of Loop when a loop body needs more than one internal step.", "subworkflow",
+            {}, {}, subsystemConfig(), QString(),
+            "Subsystem nodes do not contain direct Python code. In a skeleton, use subsystem_basic when a composite step is needed. The app infers boundary ports after the internal workflow is designed; a zero-input subsystem can act as a composite source."),
+
+        makeSpec("loop", NodeTypes::Loop, "Loop",
+            "Run fixed iterations; each iteration executes this Loop node's Python code, then exactly one direct body node.", "loop",
+            {"input"}, {"output"}, loopConfig(loopCode), loopCode,
+            "Strictly follow the current code_template. Do not wrap code in markdown fences. " + loopInstructions()),
     };
 }
 

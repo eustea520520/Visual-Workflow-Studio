@@ -78,6 +78,21 @@ int main()
         return check;
     }
 
+    const auto loop = NodeFactory::createLoopNode(QPointF(70, 80), 2, 3);
+    const vws::domain::NodeConfigView loopConfig(loop.config);
+    if (const auto check = expect(loop.type == NodeTypes::Loop
+            && loop.inputPorts == QStringList{"input"}
+            && loop.outputPorts == QStringList{"output"},
+            "Loop factory should create the standard loop ports")) {
+        return check;
+    }
+    if (const auto check = expect(loopConfig.language() == "python"
+            && loopConfig.loopIterations() == 3
+            && loopConfig.code().contains("context.get(\"loop\", {})"),
+            "Loop node should be initialized with editable Python code and iteration count")) {
+        return check;
+    }
+
     QTextStream(stdout) << "node factory tests passed" << Qt::endl;
     return 0;
 }

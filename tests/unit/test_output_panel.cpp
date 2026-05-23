@@ -34,6 +34,17 @@ int main(int argc, char* argv[])
     vws::ui::OutputPanel panel;
     panel.clearRun();
     panel.render({"Demo Workflow", {{"node-a", "Calculator"}}});
+    panel.recordWorkflowStatus("run-0", "Running");
+    panel.recordNodeStatus("run-0", "node-a", "Running");
+    panel.recordThreadTrace("run-0", "node-a", "Node worker thread started", "abc123", "worker-1");
+    if (const auto check = expect(panel.timelineRowCount() == 0
+            && panel.nodeRunRowCount() == 0
+            && panel.threadTraceRowCount() == 0,
+            "Advanced diagnostics should be disabled by default and avoid heavy table updates")) {
+        return check;
+    }
+
+    panel.setAdvancedDiagnosticsEnabled(true);
     panel.recordWorkflowStatus("run-1", "Running");
     panel.recordNodeStatus("run-1", "node-a", "Queued");
     panel.recordNodeStatus("run-1", "node-a", "Running");
@@ -73,6 +84,24 @@ int main(int argc, char* argv[])
         return check;
     }
 
+    panel.clearRun();
+    panel.setAdvancedDiagnosticsEnabled(false);
+    vws::execution::WorkflowExecutionResult orderedDebugResult;
+    orderedDebugResult.runId = "run-2";
+    orderedDebugResult.debugOutputs = {
+        {"node-a", "first print"},
+        {"node-b", "second print"},
+    };
+    panel.showExecutionResult(orderedDebugResult);
+    if (const auto check = expect(panel.nodeRunRowCount() == 0,
+            "Final result rendering should avoid heavy node tables when advanced diagnostics are disabled")) {
+        return check;
+    }
+    if (const auto check = expect(debugOutputView->toPlainText().contains("first print\n\n[node-b]"),
+            "Debug Output should keep a blank line between node print blocks")) {
+        return check;
+    }
+
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         return fail("Could not create temporary directory");
@@ -92,6 +121,7 @@ int main(int argc, char* argv[])
     artifact.nodeId = "node-a";
     artifact.type = "csv";
     artifact.path = artifactPath;
+    panel.setAdvancedDiagnosticsEnabled(true);
     panel.showArtifacts({artifact});
 
     if (const auto check = expect(panel.artifactRowCount() == 1, "Artifact table should show one artifact")) {

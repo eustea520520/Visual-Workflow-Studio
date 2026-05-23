@@ -16,6 +16,7 @@ struct NodeExecutionRequest {
     QString workspacePath;
     QString runPath;
     QString artifactPath;
+    QJsonObject context;
     int timeoutMs = 300000;
 };
 

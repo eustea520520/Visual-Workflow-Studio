@@ -13,7 +13,9 @@ public:
     void clear();
     void capture(const domain::Workflow& workflow, const QSet<QString>& selectedNodeIds);
     bool hasNodes() const;
-    domain::Workflow createPasteSubgraph(const QString& copiedNameSuffix, qreal offsetStep = 32.0);
+    domain::Workflow createPasteSubgraph(
+        const QString& copiedNameSuffix = QString(),
+        qreal offsetStep = 32.0);
 
 private:
     domain::Workflow m_copiedSubgraph;

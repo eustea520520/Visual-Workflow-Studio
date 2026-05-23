@@ -23,7 +23,8 @@ public:
         const QString& nodeId,
         const GraphIndexes& indexes,
         const QHash<QString, DataPacket>& completedEdgeData,
-        const InputMerger& inputMerger) const;
+        const InputMerger& inputMerger,
+        const QHash<QString, QJsonObject>& initialInputsByNodeId = {}) const;
 
 private:
     QString m_runId;

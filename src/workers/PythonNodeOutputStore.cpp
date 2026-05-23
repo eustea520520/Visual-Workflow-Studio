@@ -23,6 +23,7 @@ bool PythonNodeOutputStore::saveNodeOutput(
         {"node_id", request.nodeId},
         {"success", result.success},
         {"outputs", result.outputs},
+        {"metadata", result.metadata},
         {"stdout", result.stdoutText},
         {"stderr", result.stderrText},
         {"error", result.errorMessage},

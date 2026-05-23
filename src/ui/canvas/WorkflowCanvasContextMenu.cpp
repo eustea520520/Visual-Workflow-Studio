@@ -10,7 +10,8 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
     const QPoint& globalPos,
     bool canConnectSelected,
     bool hasSelection,
-    bool canRotateSelected)
+    bool canRotateSelected,
+    bool canRetitleSubsystem)
 {
     QMenu menu(parent);
     auto* starterMenu = menu.addMenu(QObject::tr("Add Starter Node"));
@@ -29,6 +30,9 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
     auto* addAgentDataToFileAction = agentMenu->addAction(QObject::tr("Data to File"));
     auto* addAgentFileToDataAction = agentMenu->addAction(QObject::tr("File to Data"));
     auto* addAgentFileToFileAction = agentMenu->addAction(QObject::tr("File to File"));
+
+    auto* addSubsystemAction = menu.addAction(QObject::tr("Add Subsystem Node"));
+    auto* addLoopAction = menu.addAction(QObject::tr("Add Loop Node"));
     menu.addSeparator();
 
     auto* connectAction = menu.addAction(QObject::tr("Connect Selected Nodes"));
@@ -36,6 +40,9 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
 
     auto* deleteAction = menu.addAction(QObject::tr("Delete Selected"));
     deleteAction->setEnabled(hasSelection);
+
+    auto* retitleSubsystemAction = menu.addAction(QObject::tr("Retitle Node"));
+    retitleSubsystemAction->setEnabled(canRetitleSubsystem);
 
     auto* rotateMenu = menu.addMenu(QObject::tr("Rotate"));
     auto* rotateClockwise90Action = rotateMenu->addAction(QObject::tr("Clockwise 90°"));
@@ -83,10 +90,16 @@ WorkflowCanvasContextAction WorkflowCanvasContextMenu::exec(
     } else if (selectedAction == addAgentFileToFileAction) {
         action.type = WorkflowCanvasContextAction::Type::AddAgent;
         action.dataTransferTemplate = DataTransferNodeTemplate::FileToFile;
+    } else if (selectedAction == addSubsystemAction) {
+        action.type = WorkflowCanvasContextAction::Type::AddSubsystem;
+    } else if (selectedAction == addLoopAction) {
+        action.type = WorkflowCanvasContextAction::Type::AddLoop;
     } else if (selectedAction == connectAction) {
         action.type = WorkflowCanvasContextAction::Type::ConnectSelected;
     } else if (selectedAction == deleteAction) {
         action.type = WorkflowCanvasContextAction::Type::DeleteSelected;
+    } else if (selectedAction == retitleSubsystemAction) {
+        action.type = WorkflowCanvasContextAction::Type::RetitleSubsystem;
     } else if (selectedAction == rotateClockwise90Action) {
         action.type = WorkflowCanvasContextAction::Type::RotateSelected;
         action.rotationDeltaDegrees = 90;

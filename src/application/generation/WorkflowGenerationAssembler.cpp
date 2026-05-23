@@ -3,6 +3,7 @@
 #include "application/generation/WorkflowGenerationTemplateCatalog.h"
 #include "application/io/NodeIoSpecUtils.h"
 #include "domain/NodeConfigKeys.h"
+#include "domain/NodeTypes.h"
 
 #include <QDateTime>
 #include <QSet>
@@ -40,20 +41,37 @@ bool WorkflowGenerationAssembler::assemble(
                 .arg(skeletonNode.nodeId, skeletonNode.templateId));
             continue;
         }
-        if (!implementationsByNodeId.contains(skeletonNode.nodeId)) {
+        const bool requiresImplementation = spec->type != domain::NodeTypes::Subsystem;
+        if (requiresImplementation && !implementationsByNodeId.contains(skeletonNode.nodeId)) {
             errors.append(QStringLiteral("Cannot assemble node %1: implementation is missing.").arg(skeletonNode.nodeId));
             continue;
         }
 
         const auto implementation = implementationsByNodeId.value(skeletonNode.nodeId);
         auto config = spec->defaultConfig;
-        for (auto it = implementation.configPatch.constBegin(); it != implementation.configPatch.constEnd(); ++it) {
-            config.insert(it.key(), it.value());
+        if (spec->type == domain::NodeTypes::Subsystem) {
+            domain::Workflow subWorkflow;
+            subWorkflow.schemaVersion = 1;
+            subWorkflow.workflowId = QStringLiteral("%1__subworkflow").arg(skeletonNode.nodeId);
+            subWorkflow.workspaceId = workspace.id;
+            subWorkflow.name = skeletonNode.name.trimmed().isEmpty() ? spec->displayName : skeletonNode.name.trimmed();
+            subWorkflow.description = QStringLiteral("Internal workflow for %1").arg(subWorkflow.name);
+            subWorkflow.createdAt = now;
+            subWorkflow.updatedAt = now;
+            subWorkflow.version = 1;
+            config.insert(ConfigKeys::SubsystemWorkflow, subWorkflow.toJson());
+        } else if (requiresImplementation) {
+            for (auto it = implementation.configPatch.constBegin(); it != implementation.configPatch.constEnd(); ++it) {
+                config.insert(it.key(), it.value());
+            }
+            config.insert(ConfigKeys::Language, QStringLiteral("python"));
+            config.insert(ConfigKeys::Entry, QStringLiteral("run"));
+            config.insert(ConfigKeys::IoTemplate, spec->ioKind);
+            config.insert(ConfigKeys::Code, implementation.code);
         }
-        config.insert(ConfigKeys::Language, QStringLiteral("python"));
-        config.insert(ConfigKeys::Entry, QStringLiteral("run"));
-        config.insert(ConfigKeys::IoTemplate, spec->ioKind);
-        config.insert(ConfigKeys::Code, implementation.code);
+        if (spec->type == domain::NodeTypes::Loop && skeletonNode.loopIterations > 0) {
+            config.insert(ConfigKeys::LoopIterations, skeletonNode.loopIterations);
+        }
 
         domain::Node node;
         node.nodeId = skeletonNode.nodeId;
@@ -73,21 +91,24 @@ bool WorkflowGenerationAssembler::assemble(
         node.inputPorts = spec->inputPorts;
         node.outputPorts = spec->outputPorts;
         domain::NodeIoSpec skeletonIoSpec;
-        if (!node.inputPorts.isEmpty() && skeletonNode.expectedInputDimension > 0) {
+        if (spec->type != domain::NodeTypes::Subsystem
+            && !node.inputPorts.isEmpty() && skeletonNode.expectedInputDimension > 0) {
             skeletonIoSpec.inputs.append(NodeIoSpecUtils::makePortSpec(
                 QStringLiteral("input"),
                 skeletonNode.expectedInputDimension,
                 QStringLiteral("llm-skeleton"),
                 skeletonNode.inputItems));
         }
-        skeletonIoSpec.outputs.append(NodeIoSpecUtils::makePortSpec(
-            QStringLiteral("output"),
-            skeletonNode.expectedOutputDimension,
-            QStringLiteral("llm-skeleton"),
-            skeletonNode.outputItems));
+        if (spec->type != domain::NodeTypes::Subsystem) {
+            skeletonIoSpec.outputs.append(NodeIoSpecUtils::makePortSpec(
+                QStringLiteral("output"),
+                skeletonNode.expectedOutputDimension,
+                QStringLiteral("llm-skeleton"),
+                skeletonNode.outputItems));
+        }
         node.ioSpec = NodeIoSpecUtils::merged(
             NodeIoSpecUtils::merged(spec->defaultIoSpec, skeletonIoSpec),
-            implementation.ioSpecPatch);
+            requiresImplementation ? implementation.ioSpecPatch : domain::NodeIoSpec{});
         node.config = config;
         node.runtime = spec->defaultRuntime;
         node.runtime.timeoutMs = implementation.timeoutMs > 0 ? implementation.timeoutMs : spec->defaultRuntime.timeoutMs;

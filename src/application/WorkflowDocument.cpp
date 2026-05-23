@@ -1,6 +1,15 @@
 #include "application/WorkflowDocument.h"
 
+#include <QJsonDocument>
+
 namespace vws::application {
+
+namespace {
+QByteArray workflowFingerprint(const domain::Workflow& workflow)
+{
+    return QJsonDocument(workflow.toJson()).toJson(QJsonDocument::Compact);
+}
+} // namespace
 
 bool WorkflowDocument::hasWorkflow() const
 {
@@ -36,6 +45,9 @@ void WorkflowDocument::replace(const domain::Workflow& workflow, ChangeState sta
 
 void WorkflowDocument::replaceFromView(const domain::Workflow& workflow)
 {
+    if (workflowFingerprint(m_workflow) == workflowFingerprint(workflow)) {
+        return;
+    }
     replace(workflow, ChangeState::Dirty);
 }
 

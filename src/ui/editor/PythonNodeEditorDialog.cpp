@@ -1,4 +1,4 @@
-﻿#include "ui/editor/PythonNodeEditorDialog.h"
+#include "ui/editor/PythonNodeEditorDialog.h"
 
 #include "ui/editor/PythonCodeEditor.h"
 #include "application/PythonCodeTemplates.h"
@@ -60,6 +60,9 @@ PythonNodeEditorDialog::PythonNodeEditorDialog(
     connect(m_titleEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_descriptionEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
     connect(m_timeoutEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
+    if (m_loopIterationsEdit != nullptr) {
+        connect(m_loopIterationsEdit, &QLineEdit::textChanged, this, [this]() { setDirty(true); });
+    }
     if (m_outputFileNameEdit != nullptr) {
         connect(m_outputFileNameEdit, &QLineEdit::textChanged, this, [this]() {
             m_outputFileNameNeedsRefresh = true;
@@ -101,6 +104,7 @@ void PythonNodeEditorDialog::closeEvent(QCloseEvent* event)
 void PythonNodeEditorDialog::buildUi(const QString& nodeName)
 {
     const bool isAgent = m_nodeType == NodeTypes::Agent;
+    const bool isLoop = m_nodeType == NodeTypes::Loop;
 
     setWindowTitle(tr("Python Node Editor - %1").arg(nodeName));
     setObjectName(QStringLiteral("pythonNodeEditorDialog"));
@@ -139,12 +143,25 @@ void PythonNodeEditorDialog::buildUi(const QString& nodeName)
         m_outputFileNameEdit->setPlaceholderText(PythonCodeTemplates::defaultOutputFileName());
         m_outputFileNameEdit->setToolTip(tr("Saved into the Python line: output_file_path = ..."));
     }
+    if (isLoop) {
+        const domain::NodeConfigView config(m_nodeConfig);
+        m_loopIterationsEdit = new QLineEdit(this);
+        m_loopIterationsEdit->setPlaceholderText(tr("Required"));
+        const int configuredMaxIterations = config.loopIterations(0);
+        if (configuredMaxIterations > 0) {
+            m_loopIterationsEdit->setText(QString::number(configuredMaxIterations));
+        }
+        m_loopIterationsEdit->setValidator(new QIntValidator(1, 1000000, m_loopIterationsEdit));
+    }
 
     auto* metadataForm = new QFormLayout();
     metadataForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     metadataForm->addRow(tr("Title"), m_titleEdit);
     metadataForm->addRow(tr("Description"), m_descriptionEdit);
     metadataForm->addRow(tr("Timeout (ms)"), m_timeoutEdit);
+    if (m_loopIterationsEdit != nullptr) {
+        metadataForm->addRow(tr("Iterations"), m_loopIterationsEdit);
+    }
     if (m_outputFileNameEdit != nullptr) {
         metadataForm->addRow(tr("Output file name\n(Python: output_file_path)"), m_outputFileNameEdit);
     }
@@ -315,6 +332,16 @@ QJsonObject PythonNodeEditorDialog::agentConfigPatch() const
     };
 }
 
+QJsonObject PythonNodeEditorDialog::loopConfigPatch() const
+{
+    if (m_nodeType != NodeTypes::Loop) {
+        return {};
+    }
+    return {
+        {ConfigKeys::LoopIterations, loopIterations()},
+    };
+}
+
 QString PythonNodeEditorDialog::agentUrl() const
 {
     return m_agentUrlEdit != nullptr ? m_agentUrlEdit->text().trimmed() : QString();
@@ -433,6 +460,17 @@ int PythonNodeEditorDialog::agentMaxRetries() const
     return value;
 }
 
+int PythonNodeEditorDialog::loopIterations() const
+{
+    if (m_loopIterationsEdit == nullptr) {
+        return 0;
+    }
+
+    bool ok = false;
+    const int value = m_loopIterationsEdit->text().trimmed().toInt(&ok);
+    return ok ? value : 0;
+}
+
 bool PythonNodeEditorDialog::validateAgentMaxRetries(QString* errorMessage) const
 {
     if (m_nodeType != "agent") {
@@ -475,6 +513,30 @@ bool PythonNodeEditorDialog::validateAgentMaxRetries(QString* errorMessage) cons
         return false;
     }
 
+    return true;
+}
+
+bool PythonNodeEditorDialog::validateLoopIterations(QString* errorMessage) const
+{
+    if (m_nodeType != NodeTypes::Loop) {
+        return true;
+    }
+    if (m_loopIterationsEdit == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Iterations is required for Loop.");
+        }
+        return false;
+    }
+
+    const auto text = m_loopIterationsEdit->text().trimmed();
+    bool ok = false;
+    const int value = text.toInt(&ok);
+    if (text.isEmpty() || !ok || value < 1) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Iterations must be a positive integer.");
+        }
+        return false;
+    }
     return true;
 }
 
@@ -554,6 +616,10 @@ void PythonNodeEditorDialog::save()
         QMessageBox::warning(this, tr("Invalid Agent Retries"), errorMessage);
         return;
     }
+    if (!validateLoopIterations(&errorMessage)) {
+        QMessageBox::warning(this, tr("Invalid Loop Setting"), errorMessage);
+        return;
+    }
 
     QString savedCode;
     if (!buildCodeForSave(&savedCode, &errorMessage)) {
@@ -569,7 +635,12 @@ void PythonNodeEditorDialog::save()
         m_saveButton->setEnabled(false);
     }
     applyEditorFieldsToCode(nullptr, false, false);
-    emit nodeSaved(nodeName(), nodeDescription(), timeoutMs(), savedCode, agentConfigPatch());
+    auto configPatch = agentConfigPatch();
+    const auto loopPatch = loopConfigPatch();
+    for (auto it = loopPatch.constBegin(); it != loopPatch.constEnd(); ++it) {
+        configPatch.insert(it.key(), it.value());
+    }
+    emit nodeSaved(nodeName(), nodeDescription(), timeoutMs(), savedCode, configPatch);
     setDirty(false);
     m_saveInProgress = false;
 }

@@ -4,12 +4,12 @@
 
 namespace vws::execution {
 
-ExecutionPlan ExecutionPlanner::plan(const domain::Workflow& workflow) const
+ExecutionPlan ExecutionPlanner::plan(const domain::Workflow& workflow, GraphValidationMode mode) const
 {
     ExecutionPlan executionPlan;
 
     GraphValidator validator;
-    const auto validation = validator.validate(workflow);
+    const auto validation = validator.validate(workflow, mode);
     executionPlan.valid = validation.valid;
     executionPlan.errors = validation.errors;
     executionPlan.warnings = validation.warnings;

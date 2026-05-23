@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
     const auto successCode =
         "def run(inputs, context):\n"
         "    print('hello from python node')\n"
-        "    return {'outputs': {'answer': inputs['value'] + 1}, 'artifacts': []}\n";
+        "    return {'outputs': {'answer': inputs['value'] + 1}, 'metadata': {'debug': {'source': 'test'}}, 'artifacts': []}\n";
 
     const auto successRequest = makeRequest(tempDir.path(), successCode);
     const auto successResult = worker.execute(successRequest);
@@ -79,6 +79,10 @@ int main(int argc, char* argv[])
     }
     if (const auto result = expect(successResult.outputs.value("answer").toInt() == 42,
             "Python output should contain answer=42")) {
+        return result;
+    }
+    if (const auto result = expect(successResult.metadata.value("debug").toObject().value("source").toString() == "test",
+            "Python metadata should be returned to C++ outside outputs")) {
         return result;
     }
     if (const auto result = expect(successResult.stdoutText.contains("hello from python node"),

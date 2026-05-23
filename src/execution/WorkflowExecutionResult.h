@@ -3,13 +3,19 @@
 #include "execution/NodeExecutionResult.h"
 
 #include <QHash>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
 namespace vws::execution {
 
-// 一次工作流运行完成后的结果快照。
-// 这个结构只保存可跨层传递的数据，不持有线程、Worker 或 Qt 对象生命周期。
+struct NodeDebugOutput {
+    QString nodeId;
+    QString text;
+};
+
+// 一次 workflow 运行结束后的轻量结果快照。
+// debugOutputs 额外保存按发生顺序排列的 print 输出，避免 QHash 节点结果打乱展示顺序。
 struct WorkflowExecutionResult {
     QString runId;
     bool success = false;
@@ -17,6 +23,7 @@ struct WorkflowExecutionResult {
     QStringList errors;
     QHash<QString, QString> nodeStatuses;
     QHash<QString, NodeExecutionResult> nodeResults;
+    QList<NodeDebugOutput> debugOutputs;
 };
 
 } // namespace vws::execution

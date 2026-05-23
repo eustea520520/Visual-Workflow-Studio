@@ -6,6 +6,7 @@
 
 #include <QApplication>
 #include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 #include <QMouseEvent>
 #include <QTextStream>
 
@@ -185,6 +186,49 @@ int main(int argc, char* argv[])
     rotatedNodeA.rotationDegrees = 0;
     nodeA->setNode(rotatedNodeA);
 
+    nodeA->setSelected(true);
+    const auto widthBeforeResize = nodeA->bodySceneRect().width();
+    const QPointF resizeHandleScenePos(
+        nodeA->bodySceneRect().right() + 6.0,
+        nodeA->bodySceneRect().center().y());
+    const QPointF resizeTargetScenePos = resizeHandleScenePos + QPointF(52.0, 0.0);
+    QGraphicsSceneMouseEvent resizePressEvent(QEvent::GraphicsSceneMousePress);
+    resizePressEvent.setScenePos(resizeHandleScenePos);
+    resizePressEvent.setPos(nodeA->mapFromScene(resizeHandleScenePos));
+    resizePressEvent.setButton(Qt::LeftButton);
+    resizePressEvent.setButtons(Qt::LeftButton);
+    canvas.scene()->sendEvent(nodeA, &resizePressEvent);
+
+    QGraphicsSceneMouseEvent resizeMoveEvent(QEvent::GraphicsSceneMouseMove);
+    resizeMoveEvent.setScenePos(resizeTargetScenePos);
+    resizeMoveEvent.setLastScenePos(resizeHandleScenePos);
+    resizeMoveEvent.setPos(nodeA->mapFromScene(resizeTargetScenePos));
+    resizeMoveEvent.setLastPos(nodeA->mapFromScene(resizeHandleScenePos));
+    resizeMoveEvent.setButtons(Qt::LeftButton);
+    canvas.scene()->sendEvent(nodeA, &resizeMoveEvent);
+
+    QGraphicsSceneMouseEvent resizeReleaseEvent(QEvent::GraphicsSceneMouseRelease);
+    resizeReleaseEvent.setScenePos(resizeTargetScenePos);
+    resizeReleaseEvent.setPos(nodeA->mapFromScene(resizeTargetScenePos));
+    resizeReleaseEvent.setButton(Qt::LeftButton);
+    resizeReleaseEvent.setButtons(Qt::NoButton);
+    canvas.scene()->sendEvent(nodeA, &resizeReleaseEvent);
+    if (const auto check = expect(nodeA->bodySceneRect().width() > widthBeforeResize + 30.0,
+            "Dragging a selected node side handle should resize the node body")) {
+        return check;
+    }
+    bool nodeSizeStored = false;
+    for (const auto& node : canvas.workflow().nodes) {
+        if (node.nodeId == "node-a") {
+            nodeSizeStored = node.size.isValid() && node.size.width > widthBeforeResize + 30.0;
+            break;
+        }
+    }
+    if (const auto check = expect(nodeSizeStored,
+            "Resized node size should be stored in canvas workflow data")) {
+        return check;
+    }
+
     const auto pressPos = canvas.mapFromScene(nodeA->outputAnchorScenePos());
     const auto releasePos = canvas.mapFromScene(nodeB->inputAnchorScenePos());
     QMouseEvent pressEvent(
@@ -216,6 +260,11 @@ int main(int argc, char* argv[])
 
     if (const auto check = expect(canvas.workflow().edges.size() == 1,
             "Dragging from an output port to an input port should create one edge")) {
+        return check;
+    }
+    if (const auto check = expect(canvas.workflow().edges.first().fromSlot == 0
+            && canvas.workflow().edges.first().toSlot == 0,
+            "Dragging default single-circle ports should create a slot-0 edge")) {
         return check;
     }
     auto* edgeItem = findFirstEdgeItem(canvas.scene());
@@ -350,6 +399,27 @@ int main(int argc, char* argv[])
         return check;
     }
 
+    vws::domain::Workflow historyWorkflow;
+    historyWorkflow.workflowId = "history-workflow";
+    historyWorkflow.workspaceId = "workspace-test";
+    historyWorkflow.name = "History Workflow";
+    historyWorkflow.nodes = {makeNode("history-a", "History A", -80, 0)};
+    canvas.setWorkflow(historyWorkflow);
+    canvas.addNode(vws::application::NodeFactory::createFunctionNode(
+        QPointF(180, 0),
+        canvas.workflow().nodes.size(),
+        vws::application::DataTransferTemplate::DataToData));
+    const auto historyWithAddedNode = canvas.history();
+    const auto workflowWithAddedNode = canvas.workflow();
+    canvas.setWorkflow(workflow);
+    canvas.setWorkflow(workflowWithAddedNode);
+    canvas.setHistory(historyWithAddedNode);
+    QApplication::sendEvent(&canvas, &undoEvent);
+    if (const auto check = expect(canvas.workflow().nodes.size() == 1,
+            "Restored canvas history should allow Ctrl+Z after switching back to a workflow")) {
+        return check;
+    }
+
     vws::domain::Workflow slotCanvasWorkflow;
     slotCanvasWorkflow.workflowId = "slot-canvas";
     slotCanvasWorkflow.workspaceId = "workspace-test";
@@ -414,6 +484,41 @@ int main(int argc, char* argv[])
             && canvas.workflow().edges.first().fromSlot == 1
             && canvas.workflow().edges.first().toSlot == 2,
             "Dragging output[1] to input[2] should create a slot-level edge")) {
+        return check;
+    }
+
+    vws::ui::WorkflowCanvas connectCanvas;
+    vws::domain::Workflow connectWorkflow;
+    connectWorkflow.workflowId = "connect-selected-canvas";
+    connectWorkflow.workspaceId = "workspace-test";
+    auto connectSourceNode = makeNode("connect-a", "Connect A", -160, 0);
+    auto connectTargetNode = makeNode("connect-b", "Connect B", 180, 0);
+    setIoDimension(connectSourceNode, 1, 3);
+    setIoDimension(connectTargetNode, 2, 1);
+    connectWorkflow.nodes = {connectSourceNode, connectTargetNode};
+    connectCanvas.setWorkflow(connectWorkflow);
+    auto* connectSource = findNodeItem(connectCanvas.scene(), "connect-a");
+    auto* connectTarget = findNodeItem(connectCanvas.scene(), "connect-b");
+    if (const auto check = expect(connectSource != nullptr && connectTarget != nullptr,
+            "Connect-selected canvas should render both nodes")) {
+        return check;
+    }
+    connectSource->setSelected(true);
+    connectTarget->setSelected(true);
+    if (const auto check = expect(connectCanvas.connectSelectedNodes(),
+            "Connect Selected Nodes should create slot-paired edges")) {
+        return check;
+    }
+    const auto connectedWorkflow = connectCanvas.workflow();
+    if (const auto check = expect(connectedWorkflow.edges.size() == 2,
+            "Connect Selected Nodes should connect as many matching slots as possible")) {
+        return check;
+    }
+    if (const auto check = expect(connectedWorkflow.edges.at(0).fromSlot == 0
+            && connectedWorkflow.edges.at(0).toSlot == 0
+            && connectedWorkflow.edges.at(1).fromSlot == 1
+            && connectedWorkflow.edges.at(1).toSlot == 1,
+            "Connect Selected Nodes should map output slots to input slots one by one")) {
         return check;
     }
 

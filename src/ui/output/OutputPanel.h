@@ -12,6 +12,7 @@
 
 class QPlainTextEdit;
 class QTableWidget;
+class QTabWidget;
 
 namespace vws::execution {
 struct WorkflowExecutionResult;
@@ -30,6 +31,8 @@ public:
     explicit OutputPanel(QWidget* parent = nullptr);
 
     void render(const OutputPanelViewModel& viewModel);
+    void setAdvancedDiagnosticsEnabled(bool enabled);
+    bool advancedDiagnosticsEnabled() const;
     void clearRun();
     void recordWorkflowStatus(const QString& runId, const QString& status);
     void recordNodeStatus(const QString& runId, const QString& nodeId, const QString& status);
@@ -61,6 +64,9 @@ public:
 
 private:
     void buildUi();
+    void updateAdvancedTabs();
+    void addTabIfMissing(QWidget* widget, const QString& title, int index = -1);
+    void removeTabForWidget(QWidget* widget);
     void appendTimelineRow(const QString& runId, const QString& scope, const QString& itemId, const QString& status);
     int ensureNodeRunRow(const QString& nodeId);
     QString displayWorkflowName(const QString& runId) const;
@@ -72,6 +78,7 @@ private:
     QTableWidget* m_nodeRunTable = nullptr;
     QTableWidget* m_threadTraceTable = nullptr;
     QTableWidget* m_artifactTable = nullptr;
+    QTabWidget* m_tabs = nullptr;
     QPlainTextEdit* m_stdoutView = nullptr;
     QPlainTextEdit* m_debugOutputView = nullptr;
     PythonCodeEditor* m_stderrView = nullptr;
@@ -79,6 +86,7 @@ private:
     QHash<QString, int> m_nodeRunRows;
     QHash<QString, QString> m_nodeNames;
     QString m_workflowName;
+    bool m_advancedDiagnosticsEnabled = false;
 };
 
 } // namespace vws::ui
