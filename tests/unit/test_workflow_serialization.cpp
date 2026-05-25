@@ -1,5 +1,8 @@
 #include "application/WorkflowEditService.h"
 #include "application/WorkflowService.h"
+#include "domain/WorkflowJsonParser.h"
+#include "domain/WorkflowSchema.h"
+#include "infrastructure/JsonUtils.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -30,6 +33,81 @@ int main(int argc, char* argv[])
 
     // Verify fixture JSON -> Workflow object -> temporary JSON file -> Workflow object.
     vws::application::WorkflowService service;
+
+    vws::domain::Edge defaultEdge;
+    if (const auto result = expect(defaultEdge.fromSlot == 0 && defaultEdge.toSlot == 0,
+            "New Edge objects should default both slots to 0")) {
+        return result;
+    }
+
+    defaultEdge.edgeId = "edge-default";
+    defaultEdge.fromNode = "a";
+    defaultEdge.fromPort = "output";
+    defaultEdge.toNode = "b";
+    defaultEdge.toPort = "input";
+    const auto defaultEdgeJson = defaultEdge.toJson();
+    if (const auto result = expect(defaultEdgeJson.contains("from_slot")
+            && defaultEdgeJson.contains("to_slot")
+            && defaultEdgeJson.value("from_slot").toInt(-1) == 0
+            && defaultEdgeJson.value("to_slot").toInt(-1) == 0,
+            "Edge JSON should always write explicit from_slot/to_slot fields")) {
+        return result;
+    }
+
+    auto oldMissingSlotWorkflowJson = QJsonObject{
+        {"schema_version", vws::domain::CurrentWorkflowSchemaVersion},
+        {"workflow_id", "legacy-missing-slots"},
+        {"nodes", QJsonArray{}},
+        {"edges", QJsonArray{QJsonObject{
+            {"edge_id", "legacy-missing-slots"},
+            {"from_node", "a"},
+            {"from_port", "output"},
+            {"to_node", "b"},
+            {"to_port", "input"},
+        }}},
+    };
+    const auto oldMissingSlotParse = vws::domain::WorkflowJsonParser::parseStrict(oldMissingSlotWorkflowJson);
+    if (const auto result = expect(!oldMissingSlotParse.success
+            && oldMissingSlotParse.errors.join("\n") == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "Workflow JSON without edge slot fields should be rejected")) {
+        return result;
+    }
+
+    auto oldNegativeSlotWorkflowJson = oldMissingSlotWorkflowJson;
+    oldNegativeSlotWorkflowJson["workflow_id"] = "legacy-negative-slots";
+    oldNegativeSlotWorkflowJson["edges"] = QJsonArray{QJsonObject{
+        {"edge_id", "legacy-negative-slots"},
+        {"from_node", "a"},
+        {"from_port", "output"},
+        {"from_slot", -1},
+        {"to_node", "b"},
+        {"to_port", "input"},
+        {"to_slot", -1},
+    }};
+    const auto oldNegativeSlotParse = vws::domain::WorkflowJsonParser::parseStrict(oldNegativeSlotWorkflowJson);
+    if (const auto result = expect(!oldNegativeSlotParse.success
+            && oldNegativeSlotParse.errors.join("\n") == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "Workflow JSON with negative edge slots should be rejected")) {
+        return result;
+    }
+
+    auto missingSchemaWorkflowJson = oldMissingSlotWorkflowJson;
+    missingSchemaWorkflowJson.remove("schema_version");
+    const auto missingSchemaParse = vws::domain::WorkflowJsonParser::parseStrict(missingSchemaWorkflowJson);
+    if (const auto result = expect(!missingSchemaParse.success
+            && missingSchemaParse.errors.join("\n") == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "Workflow JSON without schema_version should be rejected")) {
+        return result;
+    }
+
+    auto oldSchemaWorkflowJson = oldMissingSlotWorkflowJson;
+    oldSchemaWorkflowJson["schema_version"] = 1;
+    const auto oldSchemaParse = vws::domain::WorkflowJsonParser::parseStrict(oldSchemaWorkflowJson);
+    if (const auto result = expect(!oldSchemaParse.success
+            && oldSchemaParse.errors.join("\n") == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "Workflow JSON with schema_version 1 should be rejected")) {
+        return result;
+    }
 
     QString errorMessage;
     vws::domain::Workflow simpleWorkflow;
@@ -63,6 +141,17 @@ int main(int argc, char* argv[])
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         return fail("Could not create temporary directory");
+    }
+
+    const auto oldSchemaPath = QDir(tempDir.path()).filePath("old_schema_workflow.json");
+    if (!vws::infrastructure::JsonUtils::writeObjectToFile(oldSchemaPath, oldSchemaWorkflowJson, &errorMessage)) {
+        return fail(QString("Failed to write old schema workflow fixture: %1").arg(errorMessage));
+    }
+    vws::domain::Workflow rejectedWorkflow;
+    if (const auto result = expect(!service.loadWorkflow(oldSchemaPath, rejectedWorkflow, &errorMessage)
+            && errorMessage == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "WorkflowService should reject old schema workflow files with a clear error")) {
+        return result;
     }
 
     const auto roundTripPath = QDir(tempDir.path()).filePath("roundtrip_workflow.json");

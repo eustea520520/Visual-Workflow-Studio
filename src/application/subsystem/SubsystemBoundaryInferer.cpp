@@ -1,6 +1,7 @@
 #include "application/subsystem/SubsystemBoundaryInferer.h"
 
 #include <QHash>
+#include <QRegularExpression>
 #include <QSet>
 
 namespace vws::application {
@@ -17,13 +18,37 @@ QString externalPortName(const domain::Node& node, const QString& portName)
     return QStringLiteral("%1(%2)").arg(nodeDisplayName(node), portName);
 }
 
+QString boundaryKey(const QString& nodeId, const QString& portName)
+{
+    return QStringLiteral("%1:%2").arg(nodeId, portName);
+}
+
+QString edgePortKey(const QString& nodeId, const QString& portName)
+{
+    return boundaryKey(nodeId, portName);
+}
+
+QString stableToken(QString value)
+{
+    value = value.trimmed().toLower();
+    value.replace(QRegularExpression(QStringLiteral("[^a-z0-9_\\-]+")), QStringLiteral("_"));
+    value.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
+    value = value.trimmed();
+    return value.isEmpty() ? QStringLiteral("port") : value;
+}
+
+QString stableExternalPort(const QString& directionPrefix, const domain::Node& node, const QString& portName)
+{
+    return QStringLiteral("%1_%2_%3")
+        .arg(directionPrefix, stableToken(node.nodeId), stableToken(portName));
+}
+
 QString uniquePortName(const QString& baseName, QSet<QString>& usedNames)
 {
     if (!usedNames.contains(baseName)) {
         usedNames.insert(baseName);
         return baseName;
     }
-
     int suffix = 2;
     while (usedNames.contains(QStringLiteral("%1#%2").arg(baseName).arg(suffix))) {
         ++suffix;
@@ -32,6 +57,15 @@ QString uniquePortName(const QString& baseName, QSet<QString>& usedNames)
     const auto uniqueName = QStringLiteral("%1#%2").arg(baseName).arg(suffix);
     usedNames.insert(uniqueName);
     return uniqueName;
+}
+
+QHash<QString, SubsystemBoundaryPort> previousPortsByInternalEndpoint(const QList<SubsystemBoundaryPort>& ports)
+{
+    QHash<QString, SubsystemBoundaryPort> byEndpoint;
+    for (const auto& port : ports) {
+        byEndpoint.insert(boundaryKey(port.internalNodeId, port.internalPort), port);
+    }
+    return byEndpoint;
 }
 
 domain::PortDimensionSpec portSpecFor(
@@ -62,10 +96,19 @@ SubsystemBoundaryPort makeBoundaryPort(
     const domain::Node& node,
     const QString& internalPort,
     const domain::PortDimensionSpec& spec,
+    const QString& directionPrefix,
+    const QHash<QString, SubsystemBoundaryPort>& previousPorts,
     QSet<QString>& usedExternalNames)
 {
+    const auto displayName = externalPortName(node, internalPort);
+    const auto previous = previousPorts.value(boundaryKey(node.nodeId, internalPort));
     SubsystemBoundaryPort port;
-    port.externalPort = uniquePortName(externalPortName(node, internalPort), usedExternalNames);
+    port.externalPort = uniquePortName(
+        previous.externalPort.trimmed().isEmpty()
+            ? stableExternalPort(directionPrefix, node, internalPort)
+            : previous.externalPort.trimmed(),
+        usedExternalNames);
+    port.displayName = displayName;
     port.internalNodeId = node.nodeId;
     port.internalNodeName = nodeDisplayName(node);
     port.internalPort = internalPort;
@@ -81,34 +124,47 @@ SubsystemBoundaryPort makeBoundaryPort(
 
 } // namespace
 
-SubsystemBoundary SubsystemBoundaryInferer::infer(const domain::Workflow& subWorkflow, QStringList* warnings) const
+SubsystemBoundary SubsystemBoundaryInferer::infer(
+    const domain::Workflow& subWorkflow,
+    const SubsystemBoundary& previousBoundary,
+    QStringList* warnings) const
 {
-    QHash<QString, int> incomingCount;
-    QHash<QString, int> outgoingCount;
-    for (const auto& node : subWorkflow.nodes) {
-        incomingCount.insert(node.nodeId, 0);
-        outgoingCount.insert(node.nodeId, 0);
-    }
+    QSet<QString> writtenInputPorts;
+    QSet<QString> consumedOutputPorts;
     for (const auto& edge : subWorkflow.edges) {
-        outgoingCount[edge.fromNode] += 1;
-        incomingCount[edge.toNode] += 1;
+        consumedOutputPorts.insert(edgePortKey(edge.fromNode, edge.fromPort));
+        writtenInputPorts.insert(edgePortKey(edge.toNode, edge.toPort));
     }
 
     SubsystemBoundary boundary;
+    const auto previousInputs = previousPortsByInternalEndpoint(previousBoundary.inputs);
+    const auto previousOutputs = previousPortsByInternalEndpoint(previousBoundary.outputs);
     QSet<QString> usedInputNames;
     QSet<QString> usedOutputNames;
     for (const auto& node : subWorkflow.nodes) {
-        if (!node.inputPorts.isEmpty() && incomingCount.value(node.nodeId) == 0) {
-            for (const auto& portName : node.inputPorts) {
+        for (const auto& portName : node.inputPorts) {
+            if (!writtenInputPorts.contains(edgePortKey(node.nodeId, portName))) {
                 const auto spec = portSpecFor(node.ioSpec.inputs, portName);
-                boundary.inputs.append(makeBoundaryPort(node, portName, spec, usedInputNames));
+                boundary.inputs.append(makeBoundaryPort(
+                    node,
+                    portName,
+                    spec,
+                    QStringLiteral("in"),
+                    previousInputs,
+                    usedInputNames));
             }
         }
 
-        if (!node.outputPorts.isEmpty() && outgoingCount.value(node.nodeId) == 0) {
-            for (const auto& portName : node.outputPorts) {
+        for (const auto& portName : node.outputPorts) {
+            if (!consumedOutputPorts.contains(edgePortKey(node.nodeId, portName))) {
                 const auto spec = portSpecFor(node.ioSpec.outputs, portName);
-                boundary.outputs.append(makeBoundaryPort(node, portName, spec, usedOutputNames));
+                boundary.outputs.append(makeBoundaryPort(
+                    node,
+                    portName,
+                    spec,
+                    QStringLiteral("out"),
+                    previousOutputs,
+                    usedOutputNames));
             }
         }
     }

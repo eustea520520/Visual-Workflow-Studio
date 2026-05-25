@@ -2,6 +2,7 @@
 
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
+#include "domain/WorkflowJsonParser.h"
 
 #include <QHash>
 #include <QJsonArray>
@@ -96,6 +97,25 @@ bool hasCycleFrom(const QString& nodeId, const QHash<QString, QStringList>& adja
     return false;
 }
 
+void validateRawGeneratedEdgeSlots(const QJsonObject& workflowObject, WorkflowGenerationValidationResult& result)
+{
+    const auto edges = workflowObject.value(QStringLiteral("edges")).toArray();
+    for (const auto& value : edges) {
+        const auto edge = value.toObject();
+        const auto edgeId = edge.value(QStringLiteral("edge_id")).toString(QStringLiteral("<missing edge_id>"));
+        if (!edge.contains(QStringLiteral("from_slot"))) {
+            result.addError(QStringLiteral("Generated edge %1 must explicitly include from_slot.").arg(edgeId));
+        } else if (edge.value(QStringLiteral("from_slot")).toInt(-1) < 0) {
+            result.addError(QStringLiteral("Generated edge %1 from_slot must be 0 or greater.").arg(edgeId));
+        }
+        if (!edge.contains(QStringLiteral("to_slot"))) {
+            result.addError(QStringLiteral("Generated edge %1 must explicitly include to_slot.").arg(edgeId));
+        } else if (edge.value(QStringLiteral("to_slot")).toInt(-1) < 0) {
+            result.addError(QStringLiteral("Generated edge %1 to_slot must be 0 or greater.").arg(edgeId));
+        }
+    }
+}
+
 QStringList validateLoopNodes(const domain::Workflow& workflow)
 {
     QStringList errors;
@@ -155,7 +175,15 @@ WorkflowGenerationValidationResult WorkflowGenerationValidator::validateJsonText
 
     result.json = document.object();
     validateSecrets(result.json, result);
-    const auto workflow = domain::Workflow::fromJson(result.json);
+    validateRawGeneratedEdgeSlots(result.json, result);
+    const auto parseResult = domain::WorkflowJsonParser::parseStrict(result.json);
+    if (!parseResult.success) {
+        for (const auto& error : parseResult.errors) {
+            result.addError(error);
+        }
+        return result;
+    }
+    const auto workflow = parseResult.workflow;
     auto workflowResult = validateWorkflow(workflow);
     result.workflow = workflow;
     result.valid = result.valid && workflowResult.valid;

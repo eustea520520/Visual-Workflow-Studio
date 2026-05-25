@@ -10,7 +10,10 @@
 namespace vws::application {
 
 struct SubsystemBoundaryPort {
+    // Stable connection key used by parent workflow edges.
     QString externalPort;
+    // Human-readable label derived from the current internal node name and port.
+    QString displayName;
     QString internalNodeId;
     QString internalNodeName;
     QString internalPort;

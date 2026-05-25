@@ -12,6 +12,7 @@
 #include "presentation/controllers/NodeTemplateController.h"
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/RunController.h"
+#include "presentation/controllers/CanvasSessionController.h"
 #include "presentation/controllers/CanvasNavigationController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
 #include "presentation/controllers/WorkflowGenerationController.h"
@@ -234,12 +235,7 @@ void MainWindow::buildLayout()
         if (m_renderingWorkflow) {
             return;
         }
-        if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
-            m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
-        } else {
-            m_appContext.workflowController().syncCurrentWorkflowFromView(workflow);
-            m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
-        }
+        m_appContext.canvasSessionController().syncCurrentView(workflow);
     });
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowActivated, this, &MainWindow::openWorkflowById);
     connect(m_workspaceExplorer, &ui::WorkspaceExplorer::workflowDeleteRequested, this, &MainWindow::deleteWorkflowById);
@@ -383,25 +379,13 @@ void MainWindow::cacheCurrentWorkflowViewState()
         return;
     }
 
-    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
-        domain::Workflow rootWorkflow;
-        QString errorMessage;
-        if (m_appContext.canvasNavigationController().flushCurrentWorkflow(
-                m_workflowCanvas->workflow(),
-                m_workflowCanvas->history(),
-                rootWorkflow,
-                &errorMessage)) {
-            m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
-        } else if (m_outputPanel != nullptr) {
-            m_outputPanel->appendStderr(errorMessage);
-        }
-    } else {
-        m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
-        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(m_workflowCanvas->workflow());
-        m_appContext.canvasNavigationController().updateCurrentHistory(m_workflowCanvas->history());
-    }
-    if (!m_appContext.canvasNavigationController().isInsideSubsystem()) {
-        m_store.cacheWorkflowHistory(m_store.currentWorkflow().workflowId, m_workflowCanvas->history());
+    QString errorMessage;
+    if (!m_appContext.canvasSessionController().cacheCurrentView(
+            m_workflowCanvas->workflow(),
+            m_workflowCanvas->history(),
+            &errorMessage)
+        && m_outputPanel != nullptr) {
+        m_outputPanel->appendStderr(errorMessage);
     }
 }
 
@@ -415,10 +399,7 @@ void MainWindow::renderCurrentWorkflowOnCanvas()
     if (m_store.workflowHistory(m_store.currentWorkflow().workflowId, &history)) {
         // Existing per-workflow history is restored below.
     }
-    m_appContext.canvasNavigationController().setRootWorkflow(
-        m_store.currentWorkspace(),
-        m_store.currentWorkflow(),
-        history);
+    m_appContext.canvasSessionController().startRootSession(history);
     renderWorkflowOnCanvas(m_store.currentWorkflow(), history);
     updateCanvasBreadcrumb();
 }
@@ -500,7 +481,7 @@ void MainWindow::updateCanvasBreadcrumb()
 void MainWindow::enterSubsystemNode(const domain::Node& node)
 {
     QString errorMessage;
-    if (!m_appContext.canvasNavigationController().enterSubsystem(
+    if (!m_appContext.canvasSessionController().enterSubsystem(
             m_workflowCanvas->workflow(),
             m_workflowCanvas->history(),
             node.nodeId,
@@ -520,18 +501,13 @@ void MainWindow::enterSubsystemNode(const domain::Node& node)
 void MainWindow::navigateCanvasBreadcrumb(int depth)
 {
     QString errorMessage;
-    if (!m_appContext.canvasNavigationController().navigateToDepth(
+    if (!m_appContext.canvasSessionController().navigateToDepth(
             depth,
             m_workflowCanvas->workflow(),
             m_workflowCanvas->history(),
             &errorMessage)) {
         QMessageBox::warning(this, tr("Canvas Navigation"), errorMessage);
         return;
-    }
-
-    if (depth == 0) {
-        const auto rootWorkflow = m_appContext.canvasNavigationController().rootWorkflow();
-        m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
     }
 
     renderWorkflowOnCanvas(
@@ -1030,9 +1006,7 @@ void MainWindow::saveWorkflow()
 
     domain::Workflow rootWorkflow;
     QString errorMessage;
-    if (!m_appContext.canvasNavigationController().hasRootWorkflow()) {
-        rootWorkflow = m_workflowCanvas->workflow();
-    } else if (!m_appContext.canvasNavigationController().flushCurrentWorkflow(
+    if (!m_appContext.canvasSessionController().prepareRootWorkflowFromView(
             m_workflowCanvas->workflow(),
             m_workflowCanvas->history(),
             rootWorkflow,
@@ -1041,15 +1015,13 @@ void MainWindow::saveWorkflow()
         return;
     }
 
-    m_appContext.workflowController().syncCurrentWorkflowFromView(rootWorkflow);
-
     if (!m_appContext.workflowController().saveCurrentWorkflow(&errorMessage)) {
         QMessageBox::warning(this, tr("Workflow Error"), errorMessage);
         return;
     }
 
     if (!m_appContext.canvasNavigationController().isInsideSubsystem()) {
-        m_store.cacheWorkflowHistory(m_store.currentWorkflow().workflowId, m_workflowCanvas->history());
+        m_appContext.canvasSessionController().updateCurrentHistory(m_workflowCanvas->history());
     }
     refreshWorkspaceExplorer();
     updateCanvasBreadcrumb();
@@ -1062,11 +1034,7 @@ void MainWindow::saveSelectedNodeAsTemplate()
         return;
     }
 
-    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
-        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(m_workflowCanvas->workflow());
-    } else {
-        m_appContext.workflowController().syncCurrentWorkflowFromView(m_workflowCanvas->workflow());
-    }
+    m_appContext.canvasSessionController().syncCurrentView(m_workflowCanvas->workflow());
     const auto selectedNode = m_workflowCanvas->selectedNode();
     if (!selectedNode.has_value()) {
         QMessageBox::information(this, tr("Template Required"), tr("Select one node on the canvas before saving a template."));
@@ -1185,10 +1153,9 @@ void MainWindow::runCurrentWorkflow()
         return;
     }
 
-    domain::Workflow rootWorkflow;
     QString flushError;
-    if (m_appContext.canvasNavigationController().hasRootWorkflow()
-        && !m_appContext.canvasNavigationController().flushCurrentWorkflow(
+    domain::Workflow rootWorkflow;
+    if (!m_appContext.canvasSessionController().prepareRootWorkflowFromView(
             m_workflowCanvas->workflow(),
             m_workflowCanvas->history(),
             rootWorkflow,
@@ -1196,8 +1163,6 @@ void MainWindow::runCurrentWorkflow()
         QMessageBox::warning(this, tr("Run Workflow"), flushError);
         return;
     }
-    m_appContext.workflowController().syncCurrentWorkflowFromView(
-        m_appContext.canvasNavigationController().hasRootWorkflow() ? rootWorkflow : m_workflowCanvas->workflow());
     applyWorkspacePythonExecutable();
     if (m_appContext.pythonEnvironmentController().pythonExecutable().trimmed().isEmpty()) {
         QMessageBox::warning(this, tr("Run Workflow"), tr("Select a Python interpreter for this workspace before running a workflow."));
@@ -1306,7 +1271,7 @@ void MainWindow::openPythonNodeEditor(const domain::Node& node)
                     return;
                 }
 
-                m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(workflow);
+                m_appContext.canvasSessionController().syncCurrentView(workflow);
                 for (const auto& updatedNode : workflow.nodes) {
                     if (updatedNode.nodeId == nodeId) {
                         m_workflowCanvas->updateNode(updatedNode);
@@ -1405,12 +1370,7 @@ void MainWindow::retitleSubsystemNode(const domain::Node& node)
     }
 
     const auto updatedWorkflow = m_workflowCanvas->workflow();
-    if (m_appContext.canvasNavigationController().isInsideSubsystem()) {
-        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(updatedWorkflow);
-    } else {
-        m_appContext.workflowController().syncCurrentWorkflowFromView(updatedWorkflow);
-        m_appContext.canvasNavigationController().updateCurrentWorkflowFromView(updatedWorkflow);
-    }
+    m_appContext.canvasSessionController().syncCurrentView(updatedWorkflow);
 
     m_nodeInspector->displayNode(updatedNode, m_store.nodeOutputsByNodeId().value(updatedNode.nodeId));
     updateSelectedNodeStatus(updatedNode);

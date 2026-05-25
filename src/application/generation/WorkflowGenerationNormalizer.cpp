@@ -4,6 +4,7 @@
 #include "application/PythonCodeTemplates.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
+#include "domain/WorkflowSchema.h"
 
 #include <QDateTime>
 #include <QSet>
@@ -31,7 +32,7 @@ domain::Workflow WorkflowGenerationNormalizer::normalize(const domain::Workflow&
 {
     auto normalized = workflow;
     const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-    normalized.schemaVersion = 1;
+    normalized.schemaVersion = domain::CurrentWorkflowSchemaVersion;
     normalized.workflowId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     normalized.workspaceId = workspace.id;
     normalized.name = normalized.name.trimmed().isEmpty() ? QStringLiteral("Generated Workflow") : normalized.name.trimmed();
@@ -98,12 +99,6 @@ domain::Workflow WorkflowGenerationNormalizer::normalize(const domain::Workflow&
         seenEdgeIds.insert(edge.edgeId);
         edge.fromPort = QStringLiteral("output");
         edge.toPort = QStringLiteral("input");
-        if (edge.fromSlot < 0) {
-            edge.fromSlot = 0;
-        }
-        if (edge.toSlot < 0) {
-            edge.toSlot = 0;
-        }
     }
 
     m_autoLayout.applyIfNeeded(normalized);

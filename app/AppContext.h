@@ -40,6 +40,7 @@ class PythonEnvironmentController;
 class RunController;
 class WorkspaceBrowserController;
 class CanvasNavigationController;
+class CanvasSessionController;
 class WorkflowGenerationController;
 class WorkflowIoController;
 class WorkflowController;
@@ -73,6 +74,7 @@ public:
     presentation::RunController& runController();
     presentation::WorkspaceBrowserController& workspaceBrowserController();
     presentation::CanvasNavigationController& canvasNavigationController();
+    presentation::CanvasSessionController& canvasSessionController();
     presentation::WorkflowIoController& workflowIoController();
     presentation::WorkflowGenerationController& workflowGenerationController();
     application::SubsystemService& subsystemService();
@@ -108,6 +110,7 @@ private:
     std::unique_ptr<presentation::RunController> m_runController;
     std::unique_ptr<presentation::WorkspaceBrowserController> m_workspaceBrowserController;
     std::unique_ptr<presentation::CanvasNavigationController> m_canvasNavigationController;
+    std::unique_ptr<presentation::CanvasSessionController> m_canvasSessionController;
     std::unique_ptr<presentation::WorkflowIoController> m_workflowIoController;
     std::unique_ptr<presentation::WorkflowGenerationController> m_workflowGenerationController;
 };

@@ -23,6 +23,9 @@ QJsonObject InputMerger::buildInputs(
 
         int maxSlot = 0;
         for (const auto& edge : edges) {
+            if (edge.toSlot < 0) {
+                continue;
+            }
             maxSlot = qMax(maxSlot, edge.toSlot);
         }
 
@@ -32,6 +35,9 @@ QJsonObject InputMerger::buildInputs(
         }
 
         for (const auto& edge : edges) {
+            if (edge.toSlot < 0) {
+                continue;
+            }
             const auto packet = completedEdgeData.value(edge.edgeId);
             inputArray.replace(edge.toSlot, packet.value);
         }

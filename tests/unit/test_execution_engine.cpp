@@ -2,6 +2,7 @@
 #include "application/WorkflowService.h"
 #include "application/subsystem/SubsystemService.h"
 #include "execution/ExecutionEngine.h"
+#include "execution/LoopNodeExecutor.h"
 #include "workers/MockNodeWorker.h"
 #include "workers/PythonNodeWorker.h"
 #include "workers/WorkerRegistry.h"
@@ -144,6 +145,30 @@ private:
     bool m_failOnSecondIteration = false;
 };
 
+class MultiSlotEchoWorker final : public vws::workers::INodeWorker {
+public:
+    QString type() const override
+    {
+        return "echo_multi";
+    }
+
+    vws::execution::NodeExecutionResult execute(const vws::execution::NodeExecutionRequest& request) override
+    {
+        vws::execution::NodeExecutionResult result;
+        result.runId = request.runId;
+        result.nodeId = request.nodeId;
+        result.success = true;
+        result.outputs.insert("output", request.inputs.value("input").toArray());
+        result.stdoutText = QString("Multi-slot echo succeeded: %1").arg(request.nodeId);
+        return result;
+    }
+
+    void cancel(const QString& executionId) override
+    {
+        Q_UNUSED(executionId);
+    }
+};
+
 vws::domain::Workflow makeLoopWorkflow(int iterations)
 {
     vws::domain::Workflow workflow;
@@ -238,6 +263,7 @@ int main(int argc, char* argv[])
     fixture.registry.registerWorkerForType("starter", aliasWorker);
     fixture.registry.registerWorkerForType("agent", aliasWorker);
     fixture.registry.registerWorkerForType("loop", std::make_shared<LoopWorker>());
+    fixture.registry.registerWorkerForType("echo_multi", std::make_shared<MultiSlotEchoWorker>());
     if (const auto result = expect(fixture.registry.hasWorkerType("starter"),
             "WorkerRegistry should allow starter nodes to reuse a Python-style worker")) {
         return result;
@@ -355,6 +381,65 @@ int main(int argc, char* argv[])
     }
     if (const auto result = expect(nodeStatusEvents.contains("inner:Running"),
             "Subsystem child node status should be forwarded to the parent run event stream")) {
+        return result;
+    }
+
+    auto multiSlotSubsystemNode = subsystemService.createSubsystemNode("workspace-test", "Multi Slot Nested", subsystemPosition);
+    vws::domain::Workflow multiSlotChildWorkflow;
+    multiSlotChildWorkflow.workflowId = "multi-slot-child-workflow";
+    multiSlotChildWorkflow.workspaceId = "workspace-test";
+    multiSlotChildWorkflow.name = "Multi Slot Child";
+    auto multiSlotInner = makeNode("multi-slot-inner", "echo_multi");
+    setIoDimension(multiSlotInner, 3, 3);
+    multiSlotChildWorkflow.nodes = {multiSlotInner};
+    if (!subsystemService.saveSubsystemWorkflow(multiSlotSubsystemNode, multiSlotChildWorkflow, &subsystemError)) {
+        return fail(subsystemError);
+    }
+
+    vws::domain::Workflow multiSlotSubsystemWorkflow;
+    multiSlotSubsystemWorkflow.workflowId = "multi-slot-subsystem-parent";
+    multiSlotSubsystemWorkflow.workspaceId = "workspace-test";
+    multiSlotSubsystemWorkflow.name = "Multi Slot Subsystem Parent";
+    auto multiSlotStarter = makeNode("multi-slot-starter", "starter");
+    setIoDimension(multiSlotStarter, 1, 3);
+    multiSlotStarter.config.insert(
+        "mock_output",
+        QJsonArray{QJsonObject{{"slot", 0}}, QJsonObject{{"slot", 1}}, QJsonObject{{"slot", 2}}});
+    auto multiSlotSink = makeNode("multi-slot-sink");
+    setIoDimension(multiSlotSink, 3, 1);
+    multiSlotSubsystemWorkflow.nodes = {multiSlotStarter, multiSlotSubsystemNode, multiSlotSink};
+    for (int slot = 0; slot < 3; ++slot) {
+        auto inputEdge = makeEdge(
+            QString("edge-multi-slot-input-%1").arg(slot),
+            multiSlotStarter.nodeId,
+            multiSlotSubsystemNode.nodeId);
+        inputEdge.fromSlot = slot;
+        inputEdge.toPort = multiSlotSubsystemNode.inputPorts.first();
+        inputEdge.toSlot = slot;
+        multiSlotSubsystemWorkflow.edges.append(inputEdge);
+
+        auto outputEdge = makeEdge(
+            QString("edge-multi-slot-output-%1").arg(slot),
+            multiSlotSubsystemNode.nodeId,
+            multiSlotSink.nodeId);
+        outputEdge.fromPort = multiSlotSubsystemNode.outputPorts.first();
+        outputEdge.fromSlot = slot;
+        outputEdge.toSlot = slot;
+        multiSlotSubsystemWorkflow.edges.append(outputEdge);
+    }
+    const auto multiSlotSubsystemRun = fixture.engine.runWorkflow(multiSlotSubsystemWorkflow);
+    if (const auto result = expect(multiSlotSubsystemRun.success,
+            QString("Multi-slot Subsystem node should execute successfully: %1")
+                .arg(multiSlotSubsystemRun.errors.join("; ")))) {
+        return result;
+    }
+    const auto multiSlotSinkInputs = multiSlotSubsystemRun.nodeResults.value("multi-slot-sink")
+        .outputs.value("inputs").toObject().value("input").toArray();
+    if (const auto result = expect(multiSlotSinkInputs.size() == 3
+            && multiSlotSinkInputs.at(0).toObject().value("slot").toInt(-1) == 0
+            && multiSlotSinkInputs.at(1).toObject().value("slot").toInt(-1) == 1
+            && multiSlotSinkInputs.at(2).toObject().value("slot").toInt(-1) == 2,
+            "Subsystem runtime mapping should preserve multi-slot input and output order")) {
         return result;
     }
 
@@ -677,6 +762,113 @@ int main(int argc, char* argv[])
             && slotInput.at(2).toString() == "second",
             "output[1] should be delivered to input[2] with earlier slots null")) {
         return result;
+    }
+
+    auto sparseOutputWorkflow = slotWorkflow;
+    sparseOutputWorkflow.workflowId = "sparse-output-workflow";
+    sparseOutputWorkflow.nodes[0].config.insert("mock_output", QJsonArray{"only-slot-zero"});
+    sparseOutputWorkflow.edges[0].fromSlot = 2;
+    sparseOutputWorkflow.edges[0].toSlot = 1;
+    const auto sparseOutputRun = fixture.engine.runWorkflow(sparseOutputWorkflow);
+    if (const auto result = expect(sparseOutputRun.success,
+            "Router should not crash when a valid source slot has no runtime output value")) {
+        return result;
+    }
+    const auto sparseInput = sparseOutputRun.nodeResults.value("slot-target").outputs.value("inputs").toObject().value("input").toArray();
+    if (const auto result = expect(sparseInput.size() == 2
+            && sparseInput.at(0).isNull()
+            && sparseInput.at(1).isNull(),
+            "Missing runtime output slots should route as null values")) {
+        return result;
+    }
+
+    {
+        vws::execution::LoopNodeExecutor loopExecutor;
+        vws::execution::NodeExecutionRequest loopRequest;
+        loopRequest.runId = "loop-defensive";
+        loopRequest.nodeId = "loop-defensive-node";
+        loopRequest.nodeType = "loop";
+        vws::domain::Node bodyNode = makeNode("loop-defensive-body");
+
+        vws::domain::Edge negativeFromSlotEdge = makeEdge(
+            "edge-negative-from-slot",
+            loopRequest.nodeId,
+            bodyNode.nodeId);
+        negativeFromSlotEdge.fromSlot = -1;
+        negativeFromSlotEdge.toSlot = 0;
+
+        QJsonObject capturedBodyInputs;
+        const auto loopExecution = loopExecutor.execute(
+            loopRequest,
+            bodyNode,
+            {negativeFromSlotEdge},
+            1,
+            [](const vws::execution::NodeExecutionRequest& request) {
+                vws::execution::NodeExecutionResult result;
+                result.runId = request.runId;
+                result.nodeId = request.nodeId;
+                result.success = true;
+                result.outputs = {{"output", QJsonArray{QJsonObject{{"value", 1}}}}};
+                return result;
+            },
+            [&capturedBodyInputs](const vws::execution::NodeExecutionRequest& request) {
+                capturedBodyInputs = request.inputs;
+                vws::execution::NodeExecutionResult result;
+                result.runId = request.runId;
+                result.nodeId = request.nodeId;
+                result.success = true;
+                result.outputs = {{"output", QJsonArray{request.inputs}}};
+                return result;
+            },
+            {},
+            {});
+        if (const auto result = expect(loopExecution.success,
+                "LoopNodeExecutor should not crash when defensively handling a negative source slot")) {
+            return result;
+        }
+        const auto defensiveInput = capturedBodyInputs.value("input").toArray();
+        if (const auto result = expect(defensiveInput.size() == 1 && defensiveInput.at(0).isNull(),
+                "LoopNodeExecutor should map a negative source slot to null instead of indexing an array")) {
+            return result;
+        }
+
+        vws::domain::Edge negativeTargetSlotEdge = negativeFromSlotEdge;
+        negativeTargetSlotEdge.edgeId = "edge-negative-target-slot";
+        negativeTargetSlotEdge.fromSlot = 0;
+        negativeTargetSlotEdge.toSlot = -1;
+        capturedBodyInputs = {};
+        const auto negativeTargetLoopExecution = loopExecutor.execute(
+            loopRequest,
+            bodyNode,
+            {negativeTargetSlotEdge},
+            1,
+            [](const vws::execution::NodeExecutionRequest& request) {
+                vws::execution::NodeExecutionResult result;
+                result.runId = request.runId;
+                result.nodeId = request.nodeId;
+                result.success = true;
+                result.outputs = {{"output", QJsonArray{QJsonObject{{"value", 1}}}}};
+                return result;
+            },
+            [&capturedBodyInputs](const vws::execution::NodeExecutionRequest& request) {
+                capturedBodyInputs = request.inputs;
+                vws::execution::NodeExecutionResult result;
+                result.runId = request.runId;
+                result.nodeId = request.nodeId;
+                result.success = true;
+                result.outputs = {{"output", QJsonArray{request.inputs}}};
+                return result;
+            },
+            {},
+            {});
+        if (const auto result = expect(negativeTargetLoopExecution.success,
+                "LoopNodeExecutor should not crash when defensively handling a negative target slot")) {
+            return result;
+        }
+        if (const auto result = expect(!capturedBodyInputs.contains("input"),
+                "LoopNodeExecutor should ignore negative target slots instead of replacing an invalid array index")) {
+            return result;
+        }
     }
 
     QStringList completionEvents;

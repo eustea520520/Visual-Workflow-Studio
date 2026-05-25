@@ -16,6 +16,7 @@ set(CMAKE_AUTORCC ON)
 option(VWS_ENABLE_ASAN "Enable AddressSanitizer when supported by the compiler" OFF)
 option(VWS_ENABLE_TSAN "Enable ThreadSanitizer when supported by the compiler" OFF)
 option(VWS_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer when supported by the compiler" OFF)
+option(VWS_BUILD_MIGRATION_TOOLS "Build standalone workflow migration tools" OFF)
 
 if(VWS_ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
@@ -34,9 +35,19 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
+if(VWS_BUILD_MIGRATION_TOOLS)
+    add_executable(vws_workflow_migrator
+        tools/workflow_migrator/main.cpp
+    )
+    target_link_libraries(vws_workflow_migrator PRIVATE Qt6::Core)
+endif()
+
 set(DOMAIN_SOURCES
     src/domain/Workspace.h src/domain/Workspace.cpp
     src/domain/Workflow.h src/domain/Workflow.cpp
+    src/domain/WorkflowSchema.h
+    src/domain/WorkflowParseResult.h
+    src/domain/WorkflowJsonParser.h src/domain/WorkflowJsonParser.cpp
     src/domain/Node.h src/domain/Node.cpp
     src/domain/NodeIoSpec.h src/domain/NodeIoSpec.cpp
     src/domain/NodeConfigKeys.h
@@ -73,7 +84,6 @@ set(APPLICATION_SOURCES
     src/application/subsystem/SubsystemTypes.h src/application/subsystem/SubsystemTypes.cpp
     src/application/subsystem/SubsystemBoundaryInferer.h src/application/subsystem/SubsystemBoundaryInferer.cpp
     src/application/subsystem/SubsystemService.h src/application/subsystem/SubsystemService.cpp
-    src/application/subsystem/SubsystemIoMapper.h src/application/subsystem/SubsystemIoMapper.cpp
     src/application/generation/WorkflowGenerationTypes.h src/application/generation/WorkflowGenerationTypes.cpp
     src/application/generation/WorkflowGenerationTemplateCatalog.h src/application/generation/WorkflowGenerationTemplateCatalog.cpp
     src/application/generation/WorkflowGenerationPromptBuilder.h src/application/generation/WorkflowGenerationPromptBuilder.cpp
@@ -97,6 +107,7 @@ set(PRESENTATION_SOURCES
     src/presentation/controllers/RunController.h src/presentation/controllers/RunController.cpp
     src/presentation/controllers/WorkspaceBrowserController.h src/presentation/controllers/WorkspaceBrowserController.cpp
     src/presentation/controllers/CanvasNavigationController.h src/presentation/controllers/CanvasNavigationController.cpp
+    src/presentation/controllers/CanvasSessionController.h src/presentation/controllers/CanvasSessionController.cpp
     src/presentation/controllers/WorkflowIoController.h src/presentation/controllers/WorkflowIoController.cpp
     src/presentation/controllers/WorkflowGenerationController.h src/presentation/controllers/WorkflowGenerationController.cpp
 )
@@ -112,7 +123,9 @@ set(EXECUTION_SOURCES
     src/execution/GraphValidator.h src/execution/GraphValidator.cpp
     src/execution/LoopNodeExecutor.h src/execution/LoopNodeExecutor.cpp
     src/execution/ExecutionEventBus.h src/execution/ExecutionEventBus.cpp
+    src/execution/ExecutionEventForwarder.h src/execution/ExecutionEventForwarder.cpp
     src/execution/ExecutionState.h
+    src/execution/NestedWorkflowRunner.h src/execution/NestedWorkflowRunner.cpp
     src/execution/DataPacket.h
     src/execution/GraphIndexes.h src/execution/GraphIndexes.cpp
     src/execution/InputMerger.h src/execution/InputMerger.cpp
@@ -123,6 +136,8 @@ set(EXECUTION_SOURCES
     src/execution/NodeTaskRunner.h src/execution/NodeTaskRunner.cpp
     src/execution/NodeResultStatus.h src/execution/NodeResultStatus.cpp
     src/execution/ExecutionOutputRouter.h src/execution/ExecutionOutputRouter.cpp
+    src/execution/SubsystemRuntimeMapper.h src/execution/SubsystemRuntimeMapper.cpp
+    src/execution/SubsystemNodeExecutor.h src/execution/SubsystemNodeExecutor.cpp
     src/execution/ThreadTrace.h src/execution/ThreadTrace.cpp
     src/execution/WorkerPool.h src/execution/WorkerPool.cpp
 )

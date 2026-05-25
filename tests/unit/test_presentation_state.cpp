@@ -1,7 +1,10 @@
 #include "application/NodeTemplateService.h"
 #include "application/RunService.h"
+#include "application/subsystem/SubsystemService.h"
 #include "application/WorkflowService.h"
 #include "application/WorkspaceService.h"
+#include "presentation/controllers/CanvasNavigationController.h"
+#include "presentation/controllers/CanvasSessionController.h"
 #include "presentation/controllers/NodeTemplateController.h"
 #include "presentation/controllers/PythonEnvironmentController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
@@ -10,6 +13,8 @@
 #include "presentation/models/WorkflowDisplayModel.h"
 #include "presentation/controllers/WorkspaceController.h"
 #include "presentation/state/AppStore.h"
+#include "domain/WorkflowJsonParser.h"
+#include "infrastructure/JsonUtils.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -126,6 +131,31 @@ int main()
     }
     if (const auto check = expect(!store.workflowDocument().isDirty(),
             "Saving current workflow should mark the document clean")) {
+        return check;
+    }
+
+    auto oldRunSnapshotJson = store.currentWorkflow().toJson();
+    oldRunSnapshotJson.insert("schema_version", 1);
+    const auto oldRunSnapshotPath = QDir(workspaceDir.path()).filePath("old_run_snapshot.json");
+    if (const auto check = expect(vws::infrastructure::JsonUtils::writeObjectToFile(
+            oldRunSnapshotPath,
+            oldRunSnapshotJson,
+            &errorMessage),
+            QString("Should write old run snapshot fixture: %1").arg(errorMessage))) {
+        return check;
+    }
+    vws::domain::RunRecord oldSnapshotRecord;
+    oldSnapshotRecord.workflowSnapshotPath = oldRunSnapshotPath;
+    oldSnapshotRecord.workflowId = store.currentWorkflow().workflowId;
+    vws::domain::Workflow rejectedRunSnapshot;
+    bool usedCurrentWorkflowFile = false;
+    if (const auto check = expect(!workflowController.loadWorkflowSnapshotForRun(
+            oldSnapshotRecord,
+            rejectedRunSnapshot,
+            &usedCurrentWorkflowFile,
+            &errorMessage)
+            && errorMessage == vws::domain::WorkflowJsonParser::unreadableWorkspaceMessage(),
+            "WorkflowController should reject old-schema run snapshots instead of migrating them")) {
         return check;
     }
 
@@ -317,6 +347,79 @@ int main()
     if (const auto check = expect(commentedSpecs.value("target").inputs.first().dimension == 3
             && commentedSpecs.value("target").inputs.first().itemLabels == QStringList({"left", "middle", "right"}),
             "Only saved/comment-derived IO specs should define multi-slot inputs")) {
+        return check;
+    }
+
+    workflowController.createWorkflow("Canvas Session Root");
+    vws::application::SubsystemService subsystemService;
+    vws::presentation::CanvasNavigationController canvasNavigationController(subsystemService);
+    vws::presentation::CanvasSessionController canvasSessionController(
+        store,
+        workflowController,
+        canvasNavigationController);
+
+    vws::domain::NodePosition subsystemPosition;
+    auto subsystemNode = subsystemService.createSubsystemNode(
+        store.currentWorkspace().id,
+        "Session Subsystem",
+        subsystemPosition);
+    vws::domain::Workflow childWorkflow;
+    childWorkflow.workflowId = "session-child";
+    childWorkflow.workspaceId = store.currentWorkspace().id;
+    childWorkflow.name = "Session Child";
+    vws::domain::Node childNode;
+    childNode.nodeId = "session-child-node";
+    childNode.type = "starter";
+    childNode.outputPorts = {"output"};
+    childWorkflow.nodes = {childNode};
+    if (const auto check = expect(subsystemService.saveSubsystemWorkflow(
+            subsystemNode,
+            childWorkflow,
+            &errorMessage),
+            QString("SubsystemService should embed child workflow for canvas session test: %1").arg(errorMessage))) {
+        return check;
+    }
+
+    auto rootCanvasWorkflow = store.currentWorkflowSnapshot();
+    rootCanvasWorkflow.nodes = {subsystemNode};
+    canvasSessionController.startRootSession();
+    rootCanvasWorkflow.name = "Canvas Session Root Edited";
+    canvasSessionController.syncCurrentView(rootCanvasWorkflow);
+    if (const auto check = expect(store.currentWorkflow().name == "Canvas Session Root Edited"
+            && store.workflowDocument().isDirty(),
+            "CanvasSessionController should sync root canvas edits through WorkflowController")) {
+        return check;
+    }
+
+    if (const auto check = expect(canvasSessionController.enterSubsystem(
+            rootCanvasWorkflow,
+            {},
+            subsystemNode.nodeId,
+            &errorMessage),
+            QString("CanvasSessionController should enter subsystem: %1").arg(errorMessage))) {
+        return check;
+    }
+    auto editedChildCanvasWorkflow = canvasNavigationController.currentWorkflow();
+    editedChildCanvasWorkflow.name = "Session Child Edited";
+    vws::domain::Workflow flushedRootWorkflow;
+    if (const auto check = expect(canvasSessionController.prepareRootWorkflowFromView(
+            editedChildCanvasWorkflow,
+            {},
+            flushedRootWorkflow,
+            &errorMessage),
+            QString("CanvasSessionController should flush subsystem edits to root workflow: %1").arg(errorMessage))) {
+        return check;
+    }
+    vws::domain::Workflow reloadedChildWorkflow;
+    if (const auto check = expect(subsystemService.loadSubsystemWorkflow(
+            flushedRootWorkflow.nodes.first(),
+            reloadedChildWorkflow,
+            &errorMessage),
+            QString("SubsystemService should reload flushed child workflow: %1").arg(errorMessage))) {
+        return check;
+    }
+    if (const auto check = expect(reloadedChildWorkflow.name == "Session Child Edited",
+            "CanvasSessionController should preserve subsystem canvas edits when preparing the root workflow")) {
         return check;
     }
 

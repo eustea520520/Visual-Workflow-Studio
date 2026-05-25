@@ -4,6 +4,7 @@
 #include "application/io/NodeIoSpecUtils.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
+#include "domain/WorkflowSchema.h"
 
 #include <QDateTime>
 #include <QSet>
@@ -24,7 +25,7 @@ bool WorkflowGenerationAssembler::assemble(
     const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
 
     workflow = {};
-    workflow.schemaVersion = 1;
+    workflow.schemaVersion = domain::CurrentWorkflowSchemaVersion;
     workflow.workflowId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     workflow.workspaceId = workspace.id;
     workflow.name = skeleton.name.trimmed().isEmpty() ? QStringLiteral("Generated Workflow") : skeleton.name.trimmed();
@@ -51,7 +52,7 @@ bool WorkflowGenerationAssembler::assemble(
         auto config = spec->defaultConfig;
         if (spec->type == domain::NodeTypes::Subsystem) {
             domain::Workflow subWorkflow;
-            subWorkflow.schemaVersion = 1;
+            subWorkflow.schemaVersion = domain::CurrentWorkflowSchemaVersion;
             subWorkflow.workflowId = QStringLiteral("%1__subworkflow").arg(skeletonNode.nodeId);
             subWorkflow.workspaceId = workspace.id;
             subWorkflow.name = skeletonNode.name.trimmed().isEmpty() ? spec->displayName : skeletonNode.name.trimmed();

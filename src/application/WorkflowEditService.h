@@ -25,6 +25,11 @@ public:
         const domain::EdgeEndpoint& source,
         const domain::EdgeEndpoint& target,
         domain::Edge& createdEdge);
+    static bool canConnect(
+        const domain::Workflow& workflow,
+        const domain::EdgeEndpoint& source,
+        const domain::EdgeEndpoint& target,
+        QString* errorMessage = nullptr);
     static void removeEdges(domain::Workflow& workflow, const QSet<QString>& edgeIds);
     static void removeNodes(domain::Workflow& workflow, const QSet<QString>& nodeIds);
     static domain::Workflow subgraphForNodes(

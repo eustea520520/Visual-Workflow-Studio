@@ -22,6 +22,23 @@ bool containsPort(const QStringList& ports, const QString& port)
     return !port.trimmed().isEmpty() && ports.contains(port);
 }
 
+int portDimension(const QList<domain::PortDimensionSpec>& specs, const QString& portName)
+{
+    for (const auto& spec : specs) {
+        if (spec.portName == portName) {
+            return qBound(1, spec.dimension, 32);
+        }
+    }
+    return 1;
+}
+
+void setError(QString* errorMessage, const QString& message)
+{
+    if (errorMessage != nullptr) {
+        *errorMessage = message;
+    }
+}
+
 int normalizeRotation(int degrees)
 {
     int normalized = degrees % 360;
@@ -90,31 +107,8 @@ bool WorkflowEditService::connectNodes(
     const domain::EdgeEndpoint& target,
     domain::Edge& createdEdge)
 {
-    if (source.nodeId == target.nodeId
-        || source.nodeId.trimmed().isEmpty()
-        || target.nodeId.trimmed().isEmpty()
-        || source.portName.trimmed().isEmpty()
-        || target.portName.trimmed().isEmpty()
-        || source.slotIndex < 0
-        || target.slotIndex < 0) {
+    if (!canConnect(workflow, source, target)) {
         return false;
-    }
-
-    const auto* sourceNode = findNode(workflow, source.nodeId);
-    const auto* targetNode = findNode(workflow, target.nodeId);
-    if (sourceNode == nullptr || targetNode == nullptr) {
-        return false;
-    }
-    if (!containsPort(sourceNode->outputPorts, source.portName)
-        || !containsPort(targetNode->inputPorts, target.portName)) {
-        return false;
-    }
-    for (const auto& existingEdge : workflow.edges) {
-        if (existingEdge.toNode == target.nodeId
-            && existingEdge.toPort == target.portName
-            && existingEdge.toSlot == target.slotIndex) {
-            return false;
-        }
     }
 
     domain::Edge edge;
@@ -128,6 +122,59 @@ bool WorkflowEditService::connectNodes(
 
     workflow.edges.append(edge);
     createdEdge = edge;
+    return true;
+}
+
+bool WorkflowEditService::canConnect(
+    const domain::Workflow& workflow,
+    const domain::EdgeEndpoint& source,
+    const domain::EdgeEndpoint& target,
+    QString* errorMessage)
+{
+    if (source.nodeId == target.nodeId) {
+        setError(errorMessage, QStringLiteral("Cannot connect a node to itself."));
+        return false;
+    }
+    if (!source.isValid()) {
+        setError(errorMessage, QStringLiteral("Source endpoint must include node, port, and a non-negative slot."));
+        return false;
+    }
+    if (!target.isValid()) {
+        setError(errorMessage, QStringLiteral("Target endpoint must include node, port, and a non-negative slot."));
+        return false;
+    }
+
+    const auto* sourceNode = findNode(workflow, source.nodeId);
+    const auto* targetNode = findNode(workflow, target.nodeId);
+    if (sourceNode == nullptr || targetNode == nullptr) {
+        setError(errorMessage, QStringLiteral("Source or target node does not exist."));
+        return false;
+    }
+    if (!containsPort(sourceNode->outputPorts, source.portName)) {
+        setError(errorMessage, QStringLiteral("Source output port does not exist."));
+        return false;
+    }
+    if (!containsPort(targetNode->inputPorts, target.portName)) {
+        setError(errorMessage, QStringLiteral("Target input port does not exist."));
+        return false;
+    }
+    if (source.slotIndex >= portDimension(sourceNode->ioSpec.outputs, source.portName)) {
+        setError(errorMessage, QStringLiteral("Source output slot is outside the port dimension."));
+        return false;
+    }
+    if (target.slotIndex >= portDimension(targetNode->ioSpec.inputs, target.portName)) {
+        setError(errorMessage, QStringLiteral("Target input slot is outside the port dimension."));
+        return false;
+    }
+    for (const auto& existingEdge : workflow.edges) {
+        if (existingEdge.toNode == target.nodeId
+            && existingEdge.toPort == target.portName
+            && existingEdge.toSlot == target.slotIndex) {
+            setError(errorMessage, QStringLiteral("Target input slot is already connected."));
+            return false;
+        }
+    }
+
     return true;
 }
 

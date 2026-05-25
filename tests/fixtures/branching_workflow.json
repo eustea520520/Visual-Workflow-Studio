@@ -1,5 +1,5 @@
 ﻿{
-  "schema_version": 1,
+  "schema_version": 2,
   "workflow_id": "fixture-branching-workflow",
   "workspace_id": "fixture-workspace",
   "name": "Branching Workflow",

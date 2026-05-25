@@ -22,6 +22,7 @@
 #include "presentation/controllers/RunController.h"
 #include "presentation/controllers/WorkspaceBrowserController.h"
 #include "presentation/controllers/CanvasNavigationController.h"
+#include "presentation/controllers/CanvasSessionController.h"
 #include "presentation/controllers/WorkflowGenerationController.h"
 #include "presentation/controllers/WorkflowIoController.h"
 #include "presentation/controllers/WorkflowController.h"
@@ -100,6 +101,10 @@ void AppContext::initialize()
         *m_appStore);
     m_canvasNavigationController = std::make_unique<presentation::CanvasNavigationController>(
         *m_subsystemService);
+    m_canvasSessionController = std::make_unique<presentation::CanvasSessionController>(
+        *m_appStore,
+        *m_workflowController,
+        *m_canvasNavigationController);
     m_workflowIoController = std::make_unique<presentation::WorkflowIoController>();
     m_workflowGenerationController = std::make_unique<presentation::WorkflowGenerationController>(
         *m_workflowGenerationPromptBuilder,
@@ -146,6 +151,11 @@ presentation::WorkspaceBrowserController& AppContext::workspaceBrowserController
 presentation::CanvasNavigationController& AppContext::canvasNavigationController()
 {
     return *m_canvasNavigationController;
+}
+
+presentation::CanvasSessionController& AppContext::canvasSessionController()
+{
+    return *m_canvasSessionController;
 }
 
 presentation::WorkflowIoController& AppContext::workflowIoController()

@@ -98,6 +98,26 @@ int main()
             "WorkflowEditService should append a slot-0 edge to the workflow")) {
         return check;
     }
+    QString connectError;
+    if (const auto check = expect(!vws::application::WorkflowEditService::canConnect(
+                editableWorkflow,
+                vws::domain::EdgeEndpoint{"source", "output", -1},
+                vws::domain::EdgeEndpoint{"target", "input", 0},
+                &connectError)
+            && !connectError.isEmpty(),
+            "WorkflowEditService should reject negative source slots with a clear error")) {
+        return check;
+    }
+    connectError.clear();
+    if (const auto check = expect(!vws::application::WorkflowEditService::canConnect(
+                editableWorkflow,
+                vws::domain::EdgeEndpoint{"source", "output", 1},
+                vws::domain::EdgeEndpoint{"target", "input", 0},
+                &connectError)
+            && !connectError.isEmpty(),
+            "WorkflowEditService should reject source slots outside the output dimension")) {
+        return check;
+    }
 
     const auto subgraph = vws::application::WorkflowEditService::subgraphForNodes(
         editableWorkflow,

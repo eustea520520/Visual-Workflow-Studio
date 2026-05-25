@@ -3,6 +3,8 @@
 #include <QMutexLocker>
 #include <QProcess>
 
+#include <memory>
+
 namespace vws::workers {
 
 PythonProcessResult PythonProcessRunner::run(
@@ -12,58 +14,68 @@ PythonProcessResult PythonProcessRunner::run(
     const QByteArray& stdinBytes,
     int timeoutMs)
 {
-    QProcess process;
-    process.setProgram(program);
-    process.setArguments(arguments);
-    process.setProcessChannelMode(QProcess::SeparateChannels);
+    auto process = std::make_unique<QProcess>();
+    process->setProgram(program);
+    process->setArguments(arguments);
+    process->setProcessChannelMode(QProcess::SeparateChannels);
 
-    registerProcess(runId, &process);
+    registerProcess(runId, process.get());
 
-    process.start();
-    if (!process.waitForStarted(10000)) {
-        const auto error = process.errorString();
-        unregisterProcess(runId, &process);
+    process->start();
+    if (!process->waitForStarted(10000)) {
+        const auto error = process->errorString();
+        unregisterProcess(runId, process.get());
         PythonProcessResult result;
         result.errorMessage = QString("Could not start Python interpreter: %1").arg(error);
         return result;
     }
 
-    process.write(stdinBytes);
-    process.closeWriteChannel();
+    if (isRunCancelled(runId)) {
+        process->kill();
+        process->waitForFinished(3000);
+        PythonProcessResult result;
+        result.started = true;
+        result.cancelled = true;
+        result.stderrText = QString::fromUtf8(process->readAllStandardError());
+        result.exitStatus = process->exitStatus();
+        result.exitCode = process->exitCode();
+        unregisterProcess(runId, process.get());
+        return result;
+    }
 
-    if (!process.waitForFinished(timeoutMs)) {
-        process.kill();
-        process.waitForFinished(3000);
+    process->write(stdinBytes);
+    process->closeWriteChannel();
+
+    if (!process->waitForFinished(timeoutMs)) {
+        process->kill();
+        process->waitForFinished(3000);
 
         PythonProcessResult result;
         result.started = true;
         result.timedOut = true;
-        result.stderrText = QString::fromUtf8(process.readAllStandardError());
-        result.exitStatus = process.exitStatus();
-        result.exitCode = process.exitCode();
-        unregisterProcess(runId, &process);
+        result.stderrText = QString::fromUtf8(process->readAllStandardError());
+        result.exitStatus = process->exitStatus();
+        result.exitCode = process->exitCode();
+        unregisterProcess(runId, process.get());
         return result;
     }
 
     PythonProcessResult result;
     result.started = true;
-    result.exitStatus = process.exitStatus();
-    result.exitCode = process.exitCode();
-    result.stdoutText = QString::fromUtf8(process.readAllStandardOutput());
-    result.stderrText = QString::fromUtf8(process.readAllStandardError());
-    unregisterProcess(runId, &process);
+    result.cancelled = isRunCancelled(runId);
+    result.exitStatus = process->exitStatus();
+    result.exitCode = process->exitCode();
+    result.stdoutText = QString::fromUtf8(process->readAllStandardOutput());
+    result.stderrText = QString::fromUtf8(process->readAllStandardError());
+    unregisterProcess(runId, process.get());
     return result;
 }
 
 void PythonProcessRunner::cancelRun(const QString& runId)
 {
-    QSet<QProcess*> processes;
-    {
-        QMutexLocker locker(&m_processMutex);
-        processes = m_runningProcessesByRun.value(runId);
-    }
-
-    for (auto* process : processes) {
+    QMutexLocker locker(&m_processMutex);
+    m_cancelledRuns.insert(runId);
+    for (auto* process : m_runningProcessesByRun.value(runId)) {
         if (process != nullptr && process->state() != QProcess::NotRunning) {
             process->kill();
         }
@@ -86,7 +98,14 @@ void PythonProcessRunner::unregisterProcess(const QString& runId, QProcess* proc
     it.value().remove(process);
     if (it.value().isEmpty()) {
         m_runningProcessesByRun.erase(it);
+        m_cancelledRuns.remove(runId);
     }
+}
+
+bool PythonProcessRunner::isRunCancelled(const QString& runId) const
+{
+    QMutexLocker locker(&m_processMutex);
+    return m_cancelledRuns.contains(runId);
 }
 
 } // namespace vws::workers

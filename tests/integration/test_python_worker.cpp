@@ -3,9 +3,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTextStream>
+
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -152,6 +156,42 @@ int main(int argc, char* argv[])
     }
     if (const auto result = expect(failureResult.errorStack.contains("ValueError"),
             "Python traceback should be captured")) {
+        return result;
+    }
+
+    const auto slowCode =
+        "import time\n"
+        "\n"
+        "def run(inputs, context):\n"
+        "    print('before long sleep')\n"
+        "    time.sleep(30)\n"
+        "    return {'outputs': {'output': [{'done': True}]}, 'artifacts': []}\n";
+
+    auto cancelRequest = makeRequest(tempDir.path(), slowCode);
+    cancelRequest.runId = "cancel-run";
+    cancelRequest.nodeId = "cancel-node";
+    cancelRequest.timeoutMs = 60000;
+
+    vws::execution::NodeExecutionResult cancelResult;
+    QElapsedTimer cancelTimer;
+    cancelTimer.start();
+    std::thread cancelThread([&]() {
+        cancelResult = worker.execute(cancelRequest);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    worker.cancel(cancelRequest.runId);
+    cancelThread.join();
+
+    if (const auto result = expect(!cancelResult.success,
+            "Cancelled Python node should not succeed")) {
+        return result;
+    }
+    if (const auto result = expect(cancelResult.errorMessage.contains("cancelled", Qt::CaseInsensitive),
+            "Cancelled Python node should return a clear cancellation error")) {
+        return result;
+    }
+    if (const auto result = expect(cancelTimer.elapsed() < 10000,
+            "Cancelled Python node should stop promptly instead of waiting for timeout")) {
         return result;
     }
 

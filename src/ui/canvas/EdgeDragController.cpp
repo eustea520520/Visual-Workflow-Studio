@@ -16,7 +16,7 @@ EdgeDragController::~EdgeDragController()
 
 bool EdgeDragController::begin(QGraphicsScene* scene, const domain::EdgeEndpoint& source, const QPointF& startScenePos)
 {
-    if (scene == nullptr || source.nodeId.trimmed().isEmpty() || source.portName.trimmed().isEmpty()) {
+    if (scene == nullptr || !source.isValid()) {
         return false;
     }
 

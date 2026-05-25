@@ -10,8 +10,9 @@ namespace vws::workers {
 
 struct PythonProcessResult {
     bool started = false;
+    bool cancelled = false;
     bool timedOut = false;
-    QProcess::ExitStatus exitStatus;
+    QProcess::ExitStatus exitStatus = QProcess::NormalExit;
     int exitCode = -1;
     QString stdoutText;
     QString stderrText;
@@ -32,9 +33,13 @@ public:
 private:
     void registerProcess(const QString& runId, QProcess* process);
     void unregisterProcess(const QString& runId, QProcess* process);
+    bool isRunCancelled(const QString& runId) const;
 
     mutable QMutex m_processMutex;
+    // Values point to heap-owned QProcess instances whose lifetime is controlled by run().
+    // cancelRun() holds m_processMutex while killing them, so unregister/delete cannot race it.
     QHash<QString, QSet<QProcess*>> m_runningProcessesByRun;
+    QSet<QString> m_cancelledRuns;
 };
 
 } // namespace vws::workers

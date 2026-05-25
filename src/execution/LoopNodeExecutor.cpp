@@ -10,12 +10,16 @@ namespace vws::execution {
 
 QJsonValue LoopNodeExecutor::extractOutputValue(const QJsonObject& outputs, const QString& fromPort, int fromSlot)
 {
+    if (fromSlot < 0) {
+        return QJsonValue(QJsonValue::Null);
+    }
+
     const auto portValue = outputs.contains(fromPort) ? outputs.value(fromPort) : QJsonValue(outputs);
     if (portValue.isArray()) {
         const auto array = portValue.toArray();
-        return fromSlot < array.size() ? array.at(fromSlot) : QJsonValue();
+        return fromSlot < array.size() ? array.at(fromSlot) : QJsonValue(QJsonValue::Null);
     }
-    return fromSlot == 0 ? portValue : QJsonValue();
+    return fromSlot == 0 ? portValue : QJsonValue(QJsonValue::Null);
 }
 
 QJsonValue LoopNodeExecutor::firstSlotOrValue(const QJsonValue& value)
@@ -29,6 +33,10 @@ QJsonValue LoopNodeExecutor::firstSlotOrValue(const QJsonValue& value)
 
 void LoopNodeExecutor::putSlotValue(QJsonObject& inputs, const QString& port, int slot, const QJsonValue& value)
 {
+    if (slot < 0) {
+        return;
+    }
+
     auto array = inputs.value(port).toArray();
     while (array.size() <= slot) {
         array.append(QJsonValue());

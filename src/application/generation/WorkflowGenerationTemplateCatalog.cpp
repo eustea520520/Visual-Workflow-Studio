@@ -4,6 +4,7 @@
 #include "application/io/NodeIoSpecUtils.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
+#include "domain/WorkflowSchema.h"
 
 #include <QJsonArray>
 
@@ -49,7 +50,7 @@ QJsonObject agentConfig(const QString& ioTemplate, const QString& code)
 QJsonObject subsystemConfig()
 {
     return {
-        {ConfigKeys::SubsystemSchemaVersion, 1},
+        {ConfigKeys::SubsystemSchemaVersion, domain::CurrentWorkflowSchemaVersion},
         {ConfigKeys::SubsystemBoundary, QJsonObject{{"inputs", QJsonArray{}}, {"outputs", QJsonArray{}}}},
     };
 }

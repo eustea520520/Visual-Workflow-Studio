@@ -506,19 +506,17 @@ int main(int argc, char* argv[])
     connectSource->setSelected(true);
     connectTarget->setSelected(true);
     if (const auto check = expect(connectCanvas.connectSelectedNodes(),
-            "Connect Selected Nodes should create slot-paired edges")) {
+            "Connect Selected Nodes should create a first-slot shortcut edge")) {
         return check;
     }
     const auto connectedWorkflow = connectCanvas.workflow();
-    if (const auto check = expect(connectedWorkflow.edges.size() == 2,
-            "Connect Selected Nodes should connect as many matching slots as possible")) {
+    if (const auto check = expect(connectedWorkflow.edges.size() == 1,
+            "Connect Selected Nodes should create only one shortcut edge")) {
         return check;
     }
     if (const auto check = expect(connectedWorkflow.edges.at(0).fromSlot == 0
-            && connectedWorkflow.edges.at(0).toSlot == 0
-            && connectedWorkflow.edges.at(1).fromSlot == 1
-            && connectedWorkflow.edges.at(1).toSlot == 1,
-            "Connect Selected Nodes should map output slots to input slots one by one")) {
+            && connectedWorkflow.edges.at(0).toSlot == 0,
+            "Connect Selected Nodes should map output slot 0 to input slot 0")) {
         return check;
     }
 

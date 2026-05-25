@@ -30,6 +30,7 @@ QString currentRuntimeModelText()
 {
     return QStringLiteral(
         "Current VWS runtime data model, mandatory:\n"
+        "- The workflow JSON schema_version must be 2. Older schema versions and missing schema_version are rejected.\n"
         "- The app uses slot-level connections only. Every edge must set from_slot and to_slot to 0 or greater.\n"
         "- Logical port names are stable: normal executable nodes use input port \"input\" and output port \"output\"; starter nodes have no input port.\n"
         "- A node's visible circles are IO slots. expected_input_dimension / expected_output_dimension and # vws comments define the circle count. Runtime data never auto-changes dimensions.\n"

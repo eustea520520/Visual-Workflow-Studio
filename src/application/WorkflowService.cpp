@@ -4,6 +4,8 @@
 #include "application/io/PythonIoDimensionAnalyzer.h"
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeConfigView.h"
+#include "domain/WorkflowJsonParser.h"
+#include "domain/WorkflowSchema.h"
 #include "infrastructure/FileSystemUtils.h"
 #include "infrastructure/JsonUtils.h"
 
@@ -25,7 +27,7 @@ domain::Workflow WorkflowService::createEmptyWorkflow(const QString& workspaceId
     const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
 
     domain::Workflow workflow;
-    workflow.schemaVersion = 1;
+    workflow.schemaVersion = domain::CurrentWorkflowSchemaVersion;
     workflow.workflowId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     workflow.workspaceId = workspaceId;
     workflow.name = name;
@@ -42,7 +44,15 @@ bool WorkflowService::loadWorkflow(const QString& filePath, domain::Workflow& wo
         return false;
     }
 
-    workflow = domain::Workflow::fromJson(object);
+    const auto parseResult = domain::WorkflowJsonParser::parseStrict(object);
+    if (!parseResult.success) {
+        if (errorMessage != nullptr) {
+            *errorMessage = parseResult.errors.join(QStringLiteral("\n"));
+        }
+        return false;
+    }
+
+    workflow = parseResult.workflow;
     return true;
 }
 

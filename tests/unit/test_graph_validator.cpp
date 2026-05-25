@@ -234,6 +234,13 @@ int main(int argc, char* argv[])
         return result;
     }
 
+    auto outOfRangeTargetSlotWorkflow = slotWorkflow;
+    outOfRangeTargetSlotWorkflow.edges[0].toSlot = 3;
+    const auto outOfRangeTargetSlotResult = validator.validate(outOfRangeTargetSlotWorkflow);
+    if (const auto result = expect(!outOfRangeTargetSlotResult.valid, "toSlot beyond input dimension should be invalid")) {
+        return result;
+    }
+
     auto duplicateSlotWorkflow = slotWorkflow;
     auto duplicateEdge = duplicateSlotWorkflow.edges[0];
     duplicateEdge.edgeId = "edge-duplicate-slot";
@@ -246,7 +253,22 @@ int main(int argc, char* argv[])
     auto negativeSlotWorkflow = slotWorkflow;
     negativeSlotWorkflow.edges[0].fromSlot = -1;
     const auto negativeSlotResult = validator.validate(negativeSlotWorkflow);
-    if (const auto result = expect(!negativeSlotResult.valid, "Negative edge slots should be invalid")) {
+    if (const auto result = expect(!negativeSlotResult.valid, "Negative source edge slots should be invalid")) {
+        return result;
+    }
+
+    auto negativeTargetSlotWorkflow = slotWorkflow;
+    negativeTargetSlotWorkflow.edges[0].toSlot = -1;
+    const auto negativeTargetSlotResult = validator.validate(negativeTargetSlotWorkflow);
+    if (const auto result = expect(!negativeTargetSlotResult.valid, "Negative target edge slots should be invalid")) {
+        return result;
+    }
+
+    const auto subsystemNegativeSlotResult = validator.validate(
+        negativeTargetSlotWorkflow,
+        vws::execution::GraphValidationMode::SubsystemWorkflow);
+    if (const auto result = expect(!subsystemNegativeSlotResult.valid,
+            "Subsystem workflow validation should still reject negative edge slots")) {
         return result;
     }
 

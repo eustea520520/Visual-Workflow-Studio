@@ -66,6 +66,10 @@ execution::NodeExecutionResult PythonNodeWorker::execute(const execution::NodeEx
             processResult.stderrText);
     }
 
+    if (processResult.cancelled) {
+        return errorResult(request, "Python node was cancelled.", processResult.stderrText);
+    }
+
     const auto parseResult = PythonWorkerProtocol::parseResponse(
         request,
         processResult.stdoutText,

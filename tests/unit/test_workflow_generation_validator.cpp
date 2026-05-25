@@ -18,7 +18,7 @@ int expect(bool condition, const QString& message)
 QString validWorkflowJson()
 {
     return QStringLiteral(R"({
-  "schema_version": 1,
+  "schema_version": 2,
   "workflow_id": "",
   "workspace_id": "",
   "name": "Generated",
@@ -63,7 +63,7 @@ QString validWorkflowJson()
 QString zeroInputSubsystemWorkflowJson()
 {
     return QStringLiteral(R"({
-  "schema_version": 1,
+  "schema_version": 2,
   "workflow_id": "",
   "workspace_id": "",
   "name": "Generated",
@@ -82,7 +82,7 @@ QString zeroInputSubsystemWorkflowJson()
       "rotation_degrees": 0,
       "input_ports": [],
       "output_ports": ["output"],
-      "config": {"subsystem_schema_version": 1, "subsystem_workflow": {}, "subsystem_boundary": {"inputs": [], "outputs": []}},
+      "config": {"subsystem_schema_version": 2, "subsystem_workflow": {}, "subsystem_boundary": {"inputs": [], "outputs": []}},
       "runtime": {"timeout_ms": 300000, "retry_count": 0, "max_memory_mb": 1024, "concurrency_group": "default"}
     }
   ],
@@ -93,7 +93,7 @@ QString zeroInputSubsystemWorkflowJson()
 QString validLoopWorkflowJson()
 {
     return QStringLiteral(R"({
-  "schema_version": 1,
+  "schema_version": 2,
   "workflow_id": "",
   "workspace_id": "",
   "name": "Generated Loop",
@@ -156,6 +156,54 @@ int main(int argc, char* argv[])
     vws::application::WorkflowGenerationValidator validator;
     const auto valid = validator.validateJsonText(validWorkflowJson());
     if (const auto check = expect(valid.valid, QString("Valid generated workflow should pass: %1").arg(valid.errors.join("; ")))) {
+        return check;
+    }
+
+    auto missingSchema = validWorkflowJson();
+    missingSchema.replace("  \"schema_version\": 2,\n", "");
+    const auto missingSchemaResult = validator.validateJsonText(missingSchema);
+    if (const auto check = expect(!missingSchemaResult.valid,
+            "Generated workflow JSON missing schema_version should be rejected")) {
+        return check;
+    }
+
+    auto oldSchema = validWorkflowJson();
+    oldSchema.replace("\"schema_version\": 2", "\"schema_version\": 1");
+    const auto oldSchemaResult = validator.validateJsonText(oldSchema);
+    if (const auto check = expect(!oldSchemaResult.valid,
+            "Generated workflow JSON with old schema_version should be rejected")) {
+        return check;
+    }
+
+    auto missingFromSlot = validWorkflowJson();
+    missingFromSlot.replace("\"from_slot\": 0, ", "");
+    const auto missingFromSlotResult = validator.validateJsonText(missingFromSlot);
+    if (const auto check = expect(!missingFromSlotResult.valid,
+            "Generated workflow JSON missing from_slot should be rejected")) {
+        return check;
+    }
+
+    auto missingToSlot = validWorkflowJson();
+    missingToSlot.replace(", \"to_slot\": 0", "");
+    const auto missingToSlotResult = validator.validateJsonText(missingToSlot);
+    if (const auto check = expect(!missingToSlotResult.valid,
+            "Generated workflow JSON missing to_slot should be rejected")) {
+        return check;
+    }
+
+    auto negativeFromSlot = validWorkflowJson();
+    negativeFromSlot.replace("\"from_slot\": 0", "\"from_slot\": -1");
+    const auto negativeFromSlotResult = validator.validateJsonText(negativeFromSlot);
+    if (const auto check = expect(!negativeFromSlotResult.valid,
+            "Generated workflow JSON with negative from_slot should be rejected")) {
+        return check;
+    }
+
+    auto negativeToSlot = validWorkflowJson();
+    negativeToSlot.replace("\"to_slot\": 0", "\"to_slot\": -1");
+    const auto negativeToSlotResult = validator.validateJsonText(negativeToSlot);
+    if (const auto check = expect(!negativeToSlotResult.valid,
+            "Generated workflow JSON with negative to_slot should be rejected")) {
         return check;
     }
 

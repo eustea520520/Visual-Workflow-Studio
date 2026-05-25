@@ -152,40 +152,14 @@ bool WorkflowCanvas::connectSelectedNodes()
         return false;
     }
 
-    const int connectionCount = qMin(sourceItem->outputSlotCount(), targetItem->inputSlotCount());
-    if (connectionCount <= 0) {
-        return false;
-    }
-
-    pushUndoState();
-    bool createdAny = false;
-    for (int slotIndex = 0; slotIndex < connectionCount; ++slotIndex) {
-        domain::Edge edge;
-        if (!application::WorkflowEditService::connectNodes(
-                m_workflow,
-                domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), slotIndex},
-                domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), slotIndex},
-                edge)) {
-            continue;
-        }
-        addEdgeItem(edge);
-        createdAny = true;
-    }
-
-    if (createdAny) {
-        updateAllEdgeRoutes();
-        emit workflowChanged(workflow());
-    }
-    return createdAny;
+    return createEdgeBetween(
+        domain::EdgeEndpoint{sourceNode.nodeId, sourceNode.outputPorts.first(), 0},
+        domain::EdgeEndpoint{targetNode.nodeId, targetNode.inputPorts.first(), 0});
 }
 
 bool WorkflowCanvas::createEdgeBetween(const domain::EdgeEndpoint& source, const domain::EdgeEndpoint& target)
 {
-    if (source.nodeId == target.nodeId
-        || source.nodeId.trimmed().isEmpty()
-        || target.nodeId.trimmed().isEmpty()
-        || source.portName.trimmed().isEmpty()
-        || target.portName.trimmed().isEmpty()) {
+    if (!application::WorkflowEditService::canConnect(m_workflow, source, target)) {
         return false;
     }
 

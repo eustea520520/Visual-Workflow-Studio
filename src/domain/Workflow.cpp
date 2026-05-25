@@ -36,7 +36,7 @@ Workflow Workflow::fromJson(const QJsonObject& object)
     // 反序列化只做结构转换，不做合法性判断。
     // 图是否合法由 execution::GraphValidator 负责。
     Workflow workflow;
-    workflow.schemaVersion = object.value("schema_version").toInt(1);
+    workflow.schemaVersion = object.value("schema_version").toInt(CurrentWorkflowSchemaVersion);
     workflow.workflowId = object.value("workflow_id").toString();
     workflow.workspaceId = object.value("workspace_id").toString();
     workflow.name = object.value("name").toString();

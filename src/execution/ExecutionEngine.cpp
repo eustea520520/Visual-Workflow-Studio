@@ -5,11 +5,13 @@
 #include "execution/ExecutionPlanner.h"
 #include "execution/InputMerger.h"
 #include "execution/LoopNodeExecutor.h"
+#include "execution/NestedWorkflowRunner.h"
 #include "execution/NodeExecutionRequestBuilder.h"
 #include "execution/NodeReadinessTracker.h"
 #include "execution/NodeResultStatus.h"
 #include "execution/NodeTaskRunner.h"
 #include "execution/ExecutionSchedulingPolicy.h"
+#include "execution/SubsystemNodeExecutor.h"
 #include "execution/ThreadTrace.h"
 #include "execution/WorkerPool.h"
 #include "domain/NodeConfigKeys.h"
@@ -17,8 +19,6 @@
 #include "workers/WorkerRegistry.h"
 
 #include <QDir>
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
@@ -32,79 +32,6 @@
 #include <functional>
 
 namespace vws::execution {
-
-namespace {
-
-struct SubsystemBoundaryPortRuntime {
-    QString externalPort;
-    QString internalNodeId;
-    QString internalPort;
-};
-
-QList<SubsystemBoundaryPortRuntime> boundaryPorts(const QJsonObject& boundary, const QString& key)
-{
-    QList<SubsystemBoundaryPortRuntime> ports;
-    const auto array = boundary.value(key).toArray();
-    for (const auto& value : array) {
-        const auto object = value.toObject();
-        SubsystemBoundaryPortRuntime port;
-        port.externalPort = object.value("external_port").toString();
-        port.internalNodeId = object.value("internal_node_id").toString();
-        port.internalPort = object.value("internal_port").toString();
-        if (!port.externalPort.isEmpty() && !port.internalNodeId.isEmpty() && !port.internalPort.isEmpty()) {
-            ports.append(port);
-        }
-    }
-    return ports;
-}
-
-QHash<QString, QJsonObject> subsystemInitialInputs(
-    const QList<SubsystemBoundaryPortRuntime>& ports,
-    const QJsonObject& externalInputs)
-{
-    QHash<QString, QJsonObject> mapped;
-    for (const auto& port : ports) {
-        auto nodeInputs = mapped.value(port.internalNodeId);
-        nodeInputs.insert(port.internalPort, externalInputs.value(port.externalPort));
-        mapped.insert(port.internalNodeId, nodeInputs);
-    }
-    return mapped;
-}
-
-QJsonObject subsystemOutputs(
-    const QList<SubsystemBoundaryPortRuntime>& ports,
-    const WorkflowExecutionResult& internalResult)
-{
-    QJsonObject outputs;
-    for (const auto& port : ports) {
-        const auto nodeResult = internalResult.nodeResults.value(port.internalNodeId);
-        outputs.insert(port.externalPort,
-            nodeResult.outputs.contains(port.internalPort)
-                ? nodeResult.outputs.value(port.internalPort)
-                : QJsonValue(nodeResult.outputs));
-    }
-    return outputs;
-}
-
-QString subsystemTextOutput(
-    const domain::Workflow& subWorkflow,
-    const WorkflowExecutionResult& internalResult,
-    const std::function<QString(const NodeExecutionResult&)>& textSelector)
-{
-    QStringList chunks;
-    for (const auto& node : subWorkflow.nodes) {
-        const auto nodeResult = internalResult.nodeResults.value(node.nodeId);
-        const auto text = textSelector(nodeResult).trimmed();
-        if (text.isEmpty()) {
-            continue;
-        }
-        const auto label = node.name.trimmed().isEmpty() ? node.nodeId : node.name.trimmed();
-        chunks.append(QStringLiteral("[%1]\n%2").arg(label, text));
-    }
-    return chunks.join(QStringLiteral("\n\n"));
-}
-
-} // namespace
 
 ExecutionEngine::ExecutionEngine(workers::WorkerRegistry& workerRegistry)
     : m_workerRegistry(workerRegistry)
@@ -296,137 +223,23 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
         }
     };
 
-    auto cancelledNestedResult = [](const QString& runId) {
-        WorkflowExecutionResult nestedResult;
-        nestedResult.runId = runId;
-        nestedResult.success = false;
-        nestedResult.status = workflowStatusToString(WorkflowStatus::Cancelled);
-        nestedResult.errors.append(QStringLiteral("Run was cancelled."));
-        return nestedResult;
-    };
-
-    auto runNestedWorkflow = [&](
-        const QString& outerRunId,
-        const domain::Workflow& nestedWorkflow,
-        const WorkflowRunOptions& nestedOptions,
-        const QString& nestedWorkspacePath,
-        const QString& nestedRunPath,
-        const QString& nestedArtifactPath) {
-        if (isRunCancelRequested()) {
-            return cancelledNestedResult(outerRunId);
-        }
-
-        ExecutionEngine nestedEngine(m_workerRegistry);
-        const auto forwardNodeStatus = [this, outerRunId](const QString&, const QString& nodeId, const QString& status) {
-            m_eventBus.publishNodeStatusText(outerRunId, nodeId, status);
-        };
-        const auto forwardNodeError = [this, outerRunId](const QString&, const QString& nodeId, const QString& message) {
-            m_eventBus.publishNodeError(outerRunId, nodeId, message);
-        };
-        const auto forwardThreadTrace = [this, outerRunId](
-            const QString&,
-            const QString& nodeId,
-            const QString& phase,
-            const QString& threadId,
-            const QString& threadName) {
-            m_eventBus.publishThreadTrace(outerRunId, nodeId, phase, threadId, threadName);
-        };
-
-        QObject::connect(&nestedEngine.eventBus(),
-            &ExecutionEventBus::nodeStatusChanged,
-            &m_eventBus,
-            forwardNodeStatus,
-            Qt::DirectConnection);
-        QObject::connect(&nestedEngine.eventBus(),
-            &ExecutionEventBus::nodeError,
-            &m_eventBus,
-            forwardNodeError,
-            Qt::DirectConnection);
-        QObject::connect(&nestedEngine.eventBus(),
-            &ExecutionEventBus::threadTrace,
-            &m_eventBus,
-            forwardThreadTrace,
-            Qt::DirectConnection);
-
-        auto effectiveOptions = nestedOptions;
-        effectiveOptions.runIdOverride = outerRunId;
-        effectiveOptions.cancelPredicate = [&]() { return isRunCancelRequested(); };
-        return nestedEngine.runWorkflow(
-            nestedWorkflow,
-            effectiveOptions,
-            nestedWorkspacePath,
-            nestedRunPath,
-            nestedArtifactPath);
-    };
-
-    auto makeNestedWorkflowRunner = [&](const QString& outerRunId) {
-        return [&, outerRunId](const domain::Workflow& nestedWorkflow, const WorkflowRunOptions& nestedOptions) {
-            return runNestedWorkflow(
+    NestedWorkflowRunner nestedWorkflowRunner(m_workerRegistry, m_eventBus, isRunCancelRequested);
+    SubsystemNodeExecutor subsystemNodeExecutor(
+        [&](const QString& outerRunId,
+            const domain::Workflow& nestedWorkflow,
+            const WorkflowRunOptions& nestedOptions,
+            const QString& nestedWorkspacePath,
+            const QString& nestedRunPath,
+            const QString& nestedArtifactPath) {
+            return nestedWorkflowRunner.run(
                 outerRunId,
                 nestedWorkflow,
                 nestedOptions,
-                workspacePath,
-                effectiveRunPath,
-                artifactPath);
-        };
-    };
-
-    auto executeSubsystemNode = [&](const NodeExecutionRequest& request) {
-        NodeExecutionResult nodeResult;
-        nodeResult.runId = request.runId;
-        nodeResult.nodeId = request.nodeId;
-
-        if (isRunCancelRequested()) {
-            nodeResult.errorMessage = QStringLiteral("Run was cancelled.");
-            return nodeResult;
-        }
-
-        const auto subWorkflowObject = request.nodeConfig.value(domain::NodeConfigKeys::SubsystemWorkflow).toObject();
-        if (subWorkflowObject.isEmpty()) {
-            nodeResult.errorMessage = QStringLiteral("Subsystem node has no embedded workflow.");
-            return nodeResult;
-        }
-
-        const auto subWorkflow = domain::Workflow::fromJson(subWorkflowObject);
-        if (subWorkflow.nodes.isEmpty()) {
-            nodeResult.errorMessage = QStringLiteral("Subsystem workflow is empty.");
-            return nodeResult;
-        }
-
-        const auto boundary = request.nodeConfig.value(domain::NodeConfigKeys::SubsystemBoundary).toObject();
-        WorkflowRunOptions subOptions;
-        subOptions.validationMode = GraphValidationMode::SubsystemWorkflow;
-        subOptions.allowImplicitEntryNodes = true;
-        subOptions.nodeDispatchDelayMs = options.nodeDispatchDelayMs;
-        subOptions.initialInputsByNodeId = subsystemInitialInputs(boundaryPorts(boundary, "inputs"), request.inputs);
-
-        const auto internalResult = runNestedWorkflow(
-            request.runId,
-            subWorkflow,
-            subOptions,
-            request.workspacePath,
-            request.runPath,
-            request.artifactPath);
-
-        nodeResult.success = internalResult.success;
-        nodeResult.outputs = subsystemOutputs(boundaryPorts(boundary, "outputs"), internalResult);
-        nodeResult.stdoutText = subsystemTextOutput(
-            subWorkflow,
-            internalResult,
-            [](const NodeExecutionResult& result) { return result.stdoutText; });
-        nodeResult.stderrText = subsystemTextOutput(
-            subWorkflow,
-            internalResult,
-            [](const NodeExecutionResult& result) { return result.stderrText; });
-        for (const auto& internalNodeResult : internalResult.nodeResults) {
-            nodeResult.artifacts.append(internalNodeResult.artifacts);
-        }
-        if (!internalResult.success) {
-            nodeResult.errorMessage = QStringLiteral("Subsystem workflow failed: %1")
-                .arg(internalResult.errors.join("; "));
-        }
-        return nodeResult;
-    };
+                nestedWorkspacePath,
+                nestedRunPath,
+                nestedArtifactPath);
+        },
+        isRunCancelRequested);
 
     submitNode = [&](const QString& nodeId) {
         const auto request = requestBuilder.build(
@@ -457,7 +270,7 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
                 && loopBodyByLoopNodeId.contains(request.nodeId);
             auto nodeResult = [&]() {
                 if (request.nodeType == domain::NodeTypes::Subsystem) {
-                    return executeSubsystemNode(request);
+                    return subsystemNodeExecutor.execute(request, options.nodeDispatchDelayMs);
                 }
                 if (isLoopNode) {
                     const auto bodyNodeId = loopBodyByLoopNodeId.value(request.nodeId);
@@ -480,7 +293,7 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
                         },
                         [&](const NodeExecutionRequest& bodyRequest) {
                             return bodyRequest.nodeType == domain::NodeTypes::Subsystem
-                                ? executeSubsystemNode(bodyRequest)
+                                ? subsystemNodeExecutor.execute(bodyRequest, options.nodeDispatchDelayMs)
                                 : nodeTaskRunner.execute(bodyRequest);
                         },
                         [&](int iteration, const QString& nodeId, NodeStatus status) {

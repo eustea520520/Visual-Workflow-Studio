@@ -134,9 +134,11 @@ bool WorkflowController::loadWorkflowSnapshotForRun(
         *usedCurrentWorkflowFile = false;
     }
 
-    if (!record.workflowSnapshotPath.trimmed().isEmpty()
-        && m_workflowService.loadWorkflow(record.workflowSnapshotPath, workflowSnapshot, errorMessage)) {
-        return true;
+    if (!record.workflowSnapshotPath.trimmed().isEmpty()) {
+        if (m_workflowService.loadWorkflow(record.workflowSnapshotPath, workflowSnapshot, errorMessage)) {
+            return true;
+        }
+        return false;
     }
 
     if (record.workflowId.trimmed().isEmpty()) {

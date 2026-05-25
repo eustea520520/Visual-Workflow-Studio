@@ -2,6 +2,7 @@
 
 #include "domain/Edge.h"
 #include "domain/Node.h"
+#include "domain/WorkflowSchema.h"
 
 #include <QJsonObject>
 #include <QList>
@@ -13,7 +14,7 @@ namespace vws::domain {
 // nodes 是图里的点，edges 是点之间的数据依赖关系。
 // domain 层只描述数据，不负责校验、调度、数据库或 UI。
 struct Workflow {
-    int schemaVersion = 1;
+    int schemaVersion = CurrentWorkflowSchemaVersion;
     QString workflowId;
     QString workspaceId;
     QString name;

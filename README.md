@@ -49,6 +49,19 @@ workspace/
 
 `workspace.json` stores workspace-level configuration, including `config.python_executable`. Workflows cannot run until a Python interpreter is selected for the workspace.
 
+## Workflow Schema
+
+Current workflow schema version: `2`.
+
+The main application only opens current-schema workflow files. Legacy workflow JSON is no longer auto-migrated at runtime. In particular, every workflow must include `"schema_version": 2`, and every edge must explicitly include non-negative `from_slot` and `to_slot` values.
+
+Legacy files can be converted with the standalone migration tool. It is not built or linked into the main app by default:
+
+```powershell
+cmake -S . -B build-migration -G "Ninja" -DVWS_BUILD_MIGRATION_TOOLS=ON
+cmake --build build-migration --target vws_workflow_migrator
+```
+
 ## Node Types
 
 - `starter`: no input ports; creates the initial workflow output.

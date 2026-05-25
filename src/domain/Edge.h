@@ -5,8 +5,8 @@
 
 namespace vws::domain {
 
-// Edge 是节点之间的连接线，同时也是数据依赖关系。
-// from_node/from_port 的输出会传递到 to_node/to_port 的输入。
+// Slot-level connection between one output circle and one input circle.
+// Current workflow JSON must contain explicit from_slot and to_slot fields.
 struct Edge {
     QString edgeId;
     QString fromNode;

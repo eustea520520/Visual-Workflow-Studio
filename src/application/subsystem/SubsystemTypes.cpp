@@ -49,6 +49,7 @@ QJsonObject SubsystemBoundaryPort::toJson() const
 {
     return {
         {"external_port", externalPort},
+        {"display_name", displayName},
         {"internal_node_id", internalNodeId},
         {"internal_node_name", internalNodeName},
         {"internal_port", internalPort},
@@ -61,11 +62,15 @@ SubsystemBoundaryPort SubsystemBoundaryPort::fromJson(const QJsonObject& object)
 {
     SubsystemBoundaryPort port;
     port.externalPort = object.value("external_port").toString();
+    port.displayName = object.value("display_name").toString();
     port.internalNodeId = object.value("internal_node_id").toString();
     port.internalNodeName = object.value("internal_node_name").toString();
     port.internalPort = object.value("internal_port").toString();
     port.dimension = qBound(1, object.value("dimension").toInt(1), 32);
     port.itemLabels = stringListFromJson(object.value("item_labels").toArray());
+    if (port.displayName.trimmed().isEmpty()) {
+        port.displayName = port.externalPort;
+    }
     return port;
 }
 

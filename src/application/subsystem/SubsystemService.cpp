@@ -2,6 +2,8 @@
 
 #include "domain/NodeConfigKeys.h"
 #include "domain/NodeTypes.h"
+#include "domain/WorkflowJsonParser.h"
+#include "domain/WorkflowSchema.h"
 
 #include <QDateTime>
 #include <QUuid>
@@ -26,8 +28,10 @@ domain::PortDimensionSpec toPortSpec(const SubsystemBoundaryPort& boundaryPort, 
     spec.portName = boundaryPort.externalPort;
     spec.dimension = qBound(1, boundaryPort.dimension, 32);
     spec.source = QStringLiteral("subsystem-boundary");
-    spec.description = QStringLiteral("Mapped from internal node %1 port %2")
-        .arg(boundaryPort.internalNodeName, boundaryPort.internalPort);
+    spec.description = boundaryPort.displayName.trimmed().isEmpty()
+        ? QStringLiteral("Mapped from internal node %1 port %2")
+            .arg(boundaryPort.internalNodeName, boundaryPort.internalPort)
+        : boundaryPort.displayName.trimmed();
     spec.itemLabels = boundaryPort.itemLabels;
     if (spec.itemLabels.isEmpty()) {
         for (int index = 0; index < spec.dimension; ++index) {
@@ -56,7 +60,7 @@ domain::Node SubsystemService::createSubsystemNode(
     node.name = name.trimmed().isEmpty() ? QStringLiteral("Subsystem") : name.trimmed();
     node.description = QStringLiteral("Nested workflow node.");
     node.position = position;
-    node.config.insert(ConfigKeys::SubsystemSchemaVersion, 1);
+    node.config.insert(ConfigKeys::SubsystemSchemaVersion, domain::CurrentWorkflowSchemaVersion);
     node.config.insert(ConfigKeys::SubsystemWorkflow,
         createEmbeddedWorkflow(workspaceId, node.nodeId, node.name).toJson());
     node.config.insert(ConfigKeys::SubsystemBoundary, SubsystemBoundary{}.toJson());
@@ -79,13 +83,12 @@ bool SubsystemService::loadSubsystemWorkflow(
         return false;
     }
 
-    subWorkflow = domain::Workflow::fromJson(workflowObject);
-    if (subWorkflow.workflowId.trimmed().isEmpty()) {
-        subWorkflow.workflowId = QStringLiteral("%1__subworkflow").arg(subsystemNode.nodeId);
+    const auto parseResult = domain::WorkflowJsonParser::parseStrict(workflowObject);
+    if (!parseResult.success) {
+        setError(errorMessage, parseResult.errors.join(QStringLiteral("\n")));
+        return false;
     }
-    if (subWorkflow.name.trimmed().isEmpty()) {
-        subWorkflow.name = subsystemNode.name;
-    }
+    subWorkflow = parseResult.workflow;
     return true;
 }
 
@@ -99,7 +102,7 @@ bool SubsystemService::saveSubsystemWorkflow(
         return false;
     }
 
-    subsystemNode.config.insert(ConfigKeys::SubsystemSchemaVersion, 1);
+    subsystemNode.config.insert(ConfigKeys::SubsystemSchemaVersion, domain::CurrentWorkflowSchemaVersion);
     subsystemNode.config.insert(ConfigKeys::SubsystemWorkflow, subWorkflow.toJson());
     return refreshSubsystemBoundary(subsystemNode, nullptr, errorMessage);
 }
@@ -114,7 +117,9 @@ bool SubsystemService::refreshSubsystemBoundary(
         return false;
     }
 
-    const auto boundary = m_boundaryInferer.infer(subWorkflow, warnings);
+    const auto previousBoundary = SubsystemBoundary::fromJson(
+        subsystemNode.config.value(ConfigKeys::SubsystemBoundary).toObject());
+    const auto boundary = m_boundaryInferer.infer(subWorkflow, previousBoundary, warnings);
     applyBoundary(subsystemNode, boundary);
     subsystemNode.config.insert(ConfigKeys::SubsystemBoundary, boundary.toJson());
     return true;
@@ -132,7 +137,7 @@ domain::Workflow SubsystemService::createEmbeddedWorkflow(
 {
     const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     domain::Workflow workflow;
-    workflow.schemaVersion = 1;
+    workflow.schemaVersion = domain::CurrentWorkflowSchemaVersion;
     workflow.workflowId = QStringLiteral("%1__subworkflow").arg(nodeId);
     workflow.workspaceId = workspaceId;
     workflow.name = name;
