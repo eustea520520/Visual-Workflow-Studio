@@ -78,16 +78,21 @@ void LoopNodeExecutor::appendIterationDebugOutput(
     QList<NodeDebugOutput>& outputs,
     const QString& nodeId,
     const QString& text,
-    int iter)
+    int iter,
+    const DebugOutputCallback& publishDebugOutput)
 {
     const auto trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
         return;
     }
-    outputs.append(NodeDebugOutput{
+    const NodeDebugOutput output{
         nodeId,
         QStringLiteral("[Loop iteration %1]\n%2").arg(iter).arg(trimmed),
-    });
+    };
+    outputs.append(output);
+    if (publishDebugOutput) {
+        publishDebugOutput(output);
+    }
 }
 
 LoopNodeExecutionResult LoopNodeExecutor::execute(
@@ -98,6 +103,7 @@ LoopNodeExecutionResult LoopNodeExecutor::execute(
         const NodeRunner& runLoopNode,
         const NodeRunner& runBodyNode,
         const IterationStatusCallback& publishIterationStatus,
+        const DebugOutputCallback& publishDebugOutput,
         const CancelPredicate& isCancelRequested) const
 {
     LoopNodeExecutionResult result;
@@ -128,7 +134,7 @@ LoopNodeExecutionResult LoopNodeExecutor::execute(
             publishIterationStatus(iter, loopRequest.nodeId, NodeStatus::Running);
         }
         latestLoopResult = runLoopNode(iterLoopRequest);
-        appendIterationDebugOutput(result.debugOutputs, loopRequest.nodeId, latestLoopResult.stdoutText, iter);
+        appendIterationDebugOutput(result.debugOutputs, loopRequest.nodeId, latestLoopResult.stdoutText, iter, publishDebugOutput);
         loopStdout = appendIterationText(loopStdout, latestLoopResult.stdoutText, iter);
         loopStderr = appendIterationText(loopStderr, latestLoopResult.stderrText, iter);
         loopArtifacts.append(latestLoopResult.artifacts);
@@ -171,7 +177,7 @@ LoopNodeExecutionResult LoopNodeExecutor::execute(
             publishIterationStatus(iter, bodyNode.nodeId, NodeStatus::Running);
         }
         latestBodyResult = runBodyNode(bodyRequest);
-        appendIterationDebugOutput(result.debugOutputs, bodyNode.nodeId, latestBodyResult.stdoutText, iter);
+        appendIterationDebugOutput(result.debugOutputs, bodyNode.nodeId, latestBodyResult.stdoutText, iter, publishDebugOutput);
         bodyStdout = appendIterationText(bodyStdout, latestBodyResult.stdoutText, iter);
         bodyStderr = appendIterationText(bodyStderr, latestBodyResult.stderrText, iter);
         bodyArtifacts.append(latestBodyResult.artifacts);

@@ -83,8 +83,8 @@ void EdgeGraphicsItem::updatePath()
     prepareGeometryChange();
 
     EdgeRouteRequest request;
-    request.sourcePortScenePos = m_sourceNode->outputAnchorScenePos(m_edge.fromSlot);
-    request.targetPortScenePos = m_targetNode->inputAnchorScenePos(m_edge.toSlot);
+    request.sourcePortScenePos = m_sourceNode->outputAnchorScenePos(m_edge.fromPort, m_edge.fromSlot);
+    request.targetPortScenePos = m_targetNode->inputAnchorScenePos(m_edge.toPort, m_edge.toSlot);
     request.sourceNodeRect = m_sourceNode->bodySceneRect();
     request.targetNodeRect = m_targetNode->bodySceneRect();
     request.obstacleNodeRects = m_obstacleRects;

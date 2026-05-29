@@ -28,6 +28,7 @@ public:
     using NodeRunner = std::function<NodeExecutionResult(const NodeExecutionRequest& request)>;
     using CancelPredicate = std::function<bool()>;
     using IterationStatusCallback = std::function<void(int iteration, const QString& nodeId, NodeStatus status)>;
+    using DebugOutputCallback = std::function<void(const NodeDebugOutput& output)>;
 
     LoopNodeExecutionResult execute(
         const NodeExecutionRequest& loopRequest,
@@ -37,6 +38,7 @@ public:
         const NodeRunner& runLoopNode,
         const NodeRunner& runBodyNode,
         const IterationStatusCallback& publishIterationStatus,
+        const DebugOutputCallback& publishDebugOutput,
         const CancelPredicate& isCancelRequested) const;
 
 private:
@@ -50,7 +52,12 @@ private:
         const QJsonValue& previousBodyOutput,
         const QJsonArray& history);
     static QString appendIterationText(const QString& previous, const QString& text, int iter);
-    static void appendIterationDebugOutput(QList<NodeDebugOutput>& outputs, const QString& nodeId, const QString& text, int iter);
+    static void appendIterationDebugOutput(
+        QList<NodeDebugOutput>& outputs,
+        const QString& nodeId,
+        const QString& text,
+        int iter,
+        const DebugOutputCallback& publishDebugOutput);
 };
 
 } // namespace vws::execution

@@ -154,6 +154,7 @@ set(WORKER_SOURCES
 
 set(UI_SOURCES
     src/ui/main/MainWindowLayoutBuilder.h src/ui/main/MainWindowLayoutBuilder.cpp
+    src/ui/main/MainWindowUiCoordinator.h src/ui/main/MainWindowUiCoordinator.cpp
     src/ui/workspace/WorkspaceExplorerViewModel.h
     src/ui/workspace/WorkspaceExplorer.h src/ui/workspace/WorkspaceExplorer.cpp
     src/ui/canvas/WorkflowCanvas.h src/ui/canvas/WorkflowCanvas.cpp
@@ -347,6 +348,14 @@ target_link_libraries(test_main_window_layout_builder PRIVATE vws_ui Qt6::Widget
 add_test(NAME main_window_layout_builder COMMAND test_main_window_layout_builder)
 set_tests_properties(main_window_layout_builder PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+qt_add_executable(test_main_window_ui_coordinator
+    tests/unit/test_main_window_ui_coordinator.cpp
+)
+target_include_directories(test_main_window_ui_coordinator PRIVATE src)
+target_link_libraries(test_main_window_ui_coordinator PRIVATE vws_ui Qt6::Widgets)
+add_test(NAME main_window_ui_coordinator COMMAND test_main_window_ui_coordinator)
+set_tests_properties(main_window_ui_coordinator PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 vws_add_test(run_service
     tests/unit/test_run_service.cpp
 )
@@ -386,6 +395,7 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
             empty_state_overlay
             theme_manager
             main_window_layout_builder
+            main_window_ui_coordinator
             run_service
             subsystem_service
             python_editor

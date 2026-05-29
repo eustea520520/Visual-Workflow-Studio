@@ -28,6 +28,22 @@ void ExecutionEventForwarder::connectNestedRun(
         Qt::DirectConnection);
 
     QObject::connect(&nestedBus,
+        &ExecutionEventBus::nodeOutputReady,
+        &parentBus,
+        [&parentBus, outerRunId](const QString&, const QString& nodeId, const QJsonObject& outputs) {
+            parentBus.publishNodeOutputReady(outerRunId, nodeId, outputs);
+        },
+        Qt::DirectConnection);
+
+    QObject::connect(&nestedBus,
+        &ExecutionEventBus::nodeDebugOutputReady,
+        &parentBus,
+        [&parentBus, outerRunId](const QString&, const QString& nodeId, const QString& text) {
+            parentBus.publishNodeDebugOutputReady(outerRunId, nodeId, text);
+        },
+        Qt::DirectConnection);
+
+    QObject::connect(&nestedBus,
         &ExecutionEventBus::threadTrace,
         &parentBus,
         [&parentBus, outerRunId](

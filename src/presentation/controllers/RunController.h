@@ -95,6 +95,7 @@ signals:
     void nodeStatusChanged(const QString& runId, const QString& workflowId, const QString& nodeId, const QString& status);
     void workflowStatusChanged(const QString& runId, const QString& workflowId, const QString& status);
     void nodeOutputReady(const QString& runId, const QString& workflowId, const QString& nodeId, const QJsonObject& outputs);
+    void nodeDebugOutputReady(const QString& runId, const QString& workflowId, const QString& nodeId, const QString& text);
     void nodeError(const QString& runId, const QString& workflowId, const QString& nodeId, const QString& message);
     void threadTrace(
         const QString& runId,

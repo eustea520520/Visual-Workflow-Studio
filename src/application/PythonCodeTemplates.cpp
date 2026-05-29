@@ -49,6 +49,7 @@ QString ioSpecCommentForTemplate(DataTransferTemplate transferTemplate)
             "# - If the comment is removed, the node uses one default output circle.\n"
             "# - Change dimension=N and provide N comma-separated labels to create multiple output circles.\n"
             "# - For multi-output, return outputs[\"output\"] as a list; slot 0 sends output[0], slot 1 sends output[1].\n"
+            "# - Labels are visual only: labels=a,b means output[0] must be the value for a and output[1] for b.\n"
             "# - Even dimension=1 uses a one-item list: outputs[\"output\"] = [data_for_slot_0].\n"
             "# vws:output output dimension=1 labels=1\n");
     case DataTransferTemplate::DataToData:
@@ -63,6 +64,7 @@ QString ioSpecCommentForTemplate(DataTransferTemplate transferTemplate)
             "# - The logical port names stay \"input\" and \"output\"; circle slots are list indexes inside those ports.\n"
             "# - inputs.get(\"input\", []) is always a list. Use input_data[0].get(\"field\") for slot 0.\n"
             "# - outputs[\"output\"] is always a list. slot 0 sends output[0], slot 1 sends output[1].\n"
+            "# - Labels are visual only: labels=a,b means input_data[0]/output[0] is a and input_data[1]/output[1] is b.\n"
             "# vws:input input dimension=1 labels=1\n"
             "# vws:output output dimension=1 labels=1\n");
     }
@@ -512,6 +514,7 @@ QString PythonCodeTemplates::loopCode()
         "# - context[\"loop\"][\"iter\"] starts at 1; context[\"loop\"][\"index\"] starts at 0.\n"
         "# - previous_loop_output, previous_body_output, and history are available in context[\"loop\"].\n"
         "# - To add more output circles, change the output dimension and return the same number of items in outputs[\"output\"].\n"
+        "# - Labels are visual only: labels=a,b means output[0] must be the value for a and output[1] for b.\n"
         "# vws:input input dimension=1 labels=1\n"
         "# vws:output output dimension=1 labels=1\n"
         "\n"

@@ -358,7 +358,7 @@ void WorkflowCanvas::mousePressEvent(QMouseEvent* event)
                 ? m_sceneController->nodeItem(sourceHit->nodeId)
                 : nullptr;
             const auto startPos = sourceNode != nullptr
-                ? sourceNode->outputAnchorScenePos(sourceHit->slotIndex)
+                ? sourceNode->outputAnchorScenePos(sourceHit->portName, sourceHit->slotIndex)
                 : scenePos;
             m_edgeDragController.begin(m_scene, sourceHit->toEndpoint(), startPos);
             event->accept();

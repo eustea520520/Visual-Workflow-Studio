@@ -70,6 +70,7 @@ QString baseInstructions()
         "Keep # vws:input/# vws:output comments and set their dimensions/labels to match the skeleton. "
         "inputs.get(\"input\", []) is always a slot list and code must read input_data[0], input_data[1], etc. "
         "outputs[\"output\"] must always be a slot list with exactly the output dimension count, even for dimension=1. "
+        "Slot labels are visual only: for labels a,b, index 0 must carry a and index 1 must carry b. "
         "Return {\"outputs\": {\"output\": [<slot values>]}, \"artifacts\": []}. "
         "Never return a bare dict as outputs[\"output\"]. "
         "Do not wrap code in markdown fences. Do not include secrets. "

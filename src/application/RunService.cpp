@@ -7,10 +7,40 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
 
 namespace vws::application {
+
+namespace {
+
+QJsonArray artifactsToJson(const QList<domain::Artifact>& artifacts)
+{
+    QJsonArray array;
+    for (const auto& artifact : artifacts) {
+        array.append(artifact.toJson());
+    }
+    return array;
+}
+
+QJsonObject nodeOutputObject(const execution::NodeExecutionResult& result)
+{
+    return {
+        {"run_id", result.runId},
+        {"node_id", result.nodeId},
+        {"success", result.success},
+        {"outputs", result.outputs},
+        {"metadata", result.metadata},
+        {"artifacts", artifactsToJson(result.artifacts)},
+        {"stdout", result.stdoutText},
+        {"stderr", result.stderrText},
+        {"error", result.errorMessage},
+        {"traceback", result.errorStack},
+    };
+}
+
+} // namespace
 
 RunService::RunService()
 {
@@ -108,7 +138,14 @@ bool RunService::saveRunRecord(
         record.nodeRuns.append(nodeRun);
 
         if (result.nodeResults.contains(nodeId)) {
-            record.artifacts.append(result.nodeResults.value(nodeId).artifacts);
+            const auto nodeResult = result.nodeResults.value(nodeId);
+            record.artifacts.append(nodeResult.artifacts);
+            if (!infrastructure::JsonUtils::writeObjectToFile(
+                    nodeRun.outputPath,
+                    nodeOutputObject(nodeResult),
+                    errorMessage)) {
+                return false;
+            }
         }
     }
 

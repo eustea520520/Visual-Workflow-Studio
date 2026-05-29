@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -45,6 +47,15 @@ int main(int argc, char* argv[])
     result.status = "Succeeded";
     result.nodeStatuses.insert("node-a", "Succeeded");
 
+    vws::execution::NodeExecutionResult nodeResult;
+    nodeResult.runId = result.runId;
+    nodeResult.nodeId = "node-a";
+    nodeResult.success = true;
+    nodeResult.outputs.insert("output", QJsonArray{QJsonObject{{"value", 42}}});
+    nodeResult.metadata.insert("source", "run-service-test");
+    nodeResult.stdoutText = "debug line";
+    result.nodeResults.insert("node-a", nodeResult);
+
     QString errorMessage;
     if (!runService.saveRunRecord(tempDir.path(), "workspace-1", workflowSnapshot, result, &errorMessage)) {
         return fail(QString("Could not save run record: %1").arg(errorMessage));
@@ -64,6 +75,29 @@ int main(int argc, char* argv[])
     }
     if (const auto check = expect(!loadedRecord.workflowSnapshotPath.isEmpty(),
             "run_record.json should contain workflow_snapshot_path")) {
+        return check;
+    }
+    if (const auto check = expect(!loadedRecord.nodeRuns.isEmpty(),
+            "run_record.json should contain node run records")) {
+        return check;
+    }
+
+    QJsonObject savedNodeOutput;
+    if (!runService.loadNodeOutputObject(loadedRecord.nodeRuns.first(), savedNodeOutput, &errorMessage)) {
+        return fail(QString("Could not load saved node output: %1").arg(errorMessage));
+    }
+    const auto savedOutputArray = savedNodeOutput.value("outputs").toObject().value("output").toArray();
+    if (const auto check = expect(!savedOutputArray.isEmpty()
+            && savedOutputArray.first().toObject().value("value").toInt() == 42,
+            "saveRunRecord should persist final node outputs for Inspector restore")) {
+        return check;
+    }
+    if (const auto check = expect(savedNodeOutput.value("metadata").toObject().value("source").toString() == "run-service-test",
+            "saveRunRecord should persist node metadata with outputs")) {
+        return check;
+    }
+    if (const auto check = expect(savedNodeOutput.value("stdout").toString() == "debug line",
+            "saveRunRecord should persist node stdout with outputs")) {
         return check;
     }
 

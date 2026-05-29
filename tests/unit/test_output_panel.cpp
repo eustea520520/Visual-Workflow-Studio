@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QJsonObject>
 #include <QPlainTextEdit>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -34,6 +35,11 @@ int main(int argc, char* argv[])
     vws::ui::OutputPanel panel;
     panel.clearRun();
     panel.render({"Demo Workflow", {{"node-a", "Calculator"}}});
+    auto* artifactTable = panel.findChild<QTableWidget*>("artifactTable");
+    if (const auto check = expect(artifactTable != nullptr && artifactTable->isHidden(),
+            "Artifact table should be hidden while advanced diagnostics are disabled")) {
+        return check;
+    }
     panel.recordWorkflowStatus("run-0", "Running");
     panel.recordNodeStatus("run-0", "node-a", "Running");
     panel.recordThreadTrace("run-0", "node-a", "Node worker thread started", "abc123", "worker-1");
@@ -45,6 +51,10 @@ int main(int argc, char* argv[])
     }
 
     panel.setAdvancedDiagnosticsEnabled(true);
+    if (const auto check = expect(!artifactTable->isHidden(),
+            "Artifact table should become visible after advanced diagnostics are enabled")) {
+        return check;
+    }
     panel.recordWorkflowStatus("run-1", "Running");
     panel.recordNodeStatus("run-1", "node-a", "Queued");
     panel.recordNodeStatus("run-1", "node-a", "Running");
@@ -85,7 +95,22 @@ int main(int argc, char* argv[])
     }
 
     panel.clearRun();
+    panel.recordNodeDebugOutput("run-live", "node-a", "live print");
+    vws::execution::WorkflowExecutionResult liveDebugResult;
+    liveDebugResult.runId = "run-live";
+    liveDebugResult.debugOutputs = {{"node-a", "live print"}};
+    panel.showExecutionResult(liveDebugResult);
+    if (const auto check = expect(debugOutputView->toPlainText().count("live print") == 1,
+            "Final result rendering should not duplicate live node debug output")) {
+        return check;
+    }
+
+    panel.clearRun();
     panel.setAdvancedDiagnosticsEnabled(false);
+    if (const auto check = expect(artifactTable->isHidden(),
+            "Artifact table should be hidden again after advanced diagnostics are disabled")) {
+        return check;
+    }
     vws::execution::WorkflowExecutionResult orderedDebugResult;
     orderedDebugResult.runId = "run-2";
     orderedDebugResult.debugOutputs = {

@@ -90,6 +90,11 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
         const auto trace = currentThreadTraceInfo();
         m_eventBus.publishThreadTrace(result.runId, nodeId, phase, trace.threadId, trace.threadName);
     };
+    auto publishNodeDebugOutput = [&](const QString& nodeId, const QString& text) {
+        if (!text.trimmed().isEmpty()) {
+            m_eventBus.publishNodeDebugOutputReady(result.runId, nodeId, text);
+        }
+    };
 
     runState.setWorkflowStatus(WorkflowStatus::Validating);
     m_eventBus.publishWorkflowStatusChanged(result.runId, WorkflowStatus::Validating);
@@ -303,6 +308,9 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
                                 waitAfterVisibleNodeStatus();
                             }
                         },
+                        [&](const NodeDebugOutput& output) {
+                            publishNodeDebugOutput(output.nodeId, output.text);
+                        },
                         [&]() { return isRunCancelRequested(); });
                     if (loopExecutionResult.success) {
                         return loopExecutionResult.loopResult;
@@ -325,6 +333,9 @@ WorkflowExecutionResult ExecutionEngine::runWorkflow(
             runState.recordNodeResult(request.nodeId, nodeResult);
             if (!isLoopNode) {
                 runState.appendDebugOutput(request.nodeId, nodeResult.stdoutText);
+                if (request.nodeType != domain::NodeTypes::Subsystem) {
+                    publishNodeDebugOutput(request.nodeId, nodeResult.stdoutText);
+                }
             }
             runState.decrementActiveTasks();
 

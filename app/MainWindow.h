@@ -10,6 +10,7 @@
 #include <QMainWindow>
 #include <QPointF>
 #include <QJsonObject>
+#include <memory>
 
 class QLabel;
 class QWidget;
@@ -25,6 +26,7 @@ class AppStore;
 namespace ui {
 class CommandBar;
 class CanvasHeader;
+class MainWindowUiCoordinator;
 class NodeInspector;
 class OutputPanel;
 class ThemeManager;
@@ -36,6 +38,7 @@ class EmptyStateOverlay;
 class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(AppContext& appContext, QWidget* parent = nullptr);
+    ~MainWindow() override;
 
 private:
     void buildActions();
@@ -80,7 +83,6 @@ private:
     void refreshWorkspaceExplorer();
     void applyWorkspacePythonExecutable();
     void updatePythonStatus();
-    void updateSelectedNodeStatus(const domain::Node& node);
     void configureNodeDispatchDelay();
     bool ensureWorkspaceOpen();
     bool ensureWorkflowOpen();
@@ -89,6 +91,7 @@ private:
     presentation::AppStore& m_store;
     ui::ThemeManager* m_themeManager = nullptr;
     ui::CommandBar* m_commandBar = nullptr;
+    std::unique_ptr<ui::MainWindowUiCoordinator> m_uiCoordinator;
     ui::CanvasHeader* m_canvasHeader = nullptr;
     ui::WorkspaceExplorer* m_workspaceExplorer = nullptr;
     ui::WorkflowCanvas* m_workflowCanvas = nullptr;

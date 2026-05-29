@@ -36,6 +36,7 @@ QString currentRuntimeModelText()
         "- A node's visible circles are IO slots. expected_input_dimension / expected_output_dimension and # vws comments define the circle count. Runtime data never auto-changes dimensions.\n"
         "- Python receives inputs[\"input\"] as a list of slot values. Slot 0 is input_data[0], slot 1 is input_data[1], etc.\n"
         "- Python must return outputs[\"output\"] as a list of slot values. Slot 0 is outputs[\"output\"][0], slot 1 is outputs[\"output\"][1], etc.\n"
+        "- Slot labels are visual only and do not bind data by name. If labels are a,b, then list index 0 must contain a and list index 1 must contain b.\n"
         "- Even a one-output node must return a one-item list, for example {\"outputs\": {\"output\": [result]}, \"artifacts\": []}.\n"
         "- Do not return outputs[\"output\"] as a bare dict/string/number. Wrap it in a list.\n"
         "- Small business data should be JSON-serializable dict/list/string/number/bool/null values.\n"

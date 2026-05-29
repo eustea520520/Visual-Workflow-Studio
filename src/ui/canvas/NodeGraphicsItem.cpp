@@ -222,6 +222,16 @@ QPointF NodeGraphicsItem::outputAnchorScenePos(int slotIndex) const
     return mapToScene(slotAnchorLocalPos(false, slotIndex < 0 ? 0 : slotIndex));
 }
 
+QPointF NodeGraphicsItem::inputAnchorScenePos(const QString& portName, int slotIndex) const
+{
+    return mapToScene(slotAnchorLocalPos(true, portName, slotIndex));
+}
+
+QPointF NodeGraphicsItem::outputAnchorScenePos(const QString& portName, int slotIndex) const
+{
+    return mapToScene(slotAnchorLocalPos(false, portName, slotIndex));
+}
+
 QPointF NodeGraphicsItem::inputSlotAnchorScenePos(int slotIndex) const
 {
     return inputAnchorScenePos(slotIndex);
@@ -507,6 +517,24 @@ QPointF NodeGraphicsItem::slotAnchorLocalPos(bool inputSide, int slotIndex) cons
     default:
         return inputSide ? QPointF(body.left(), offset) : QPointF(body.right(), offset);
     }
+}
+
+QPointF NodeGraphicsItem::slotAnchorLocalPos(bool inputSide, const QString& portName, int slotIndex) const
+{
+    return slotAnchorLocalPos(inputSide, visualSlotIndex(inputSide, portName, slotIndex));
+}
+
+int NodeGraphicsItem::visualSlotIndex(bool inputSide, const QString& portName, int slotIndex) const
+{
+    const auto portSlots = inputSide ? m_inputSlots : m_outputSlots;
+    const auto normalizedPort = portName.trimmed();
+    for (int index = 0; index < portSlots.size(); ++index) {
+        const auto& slot = portSlots.at(index);
+        if (slot.portName == normalizedPort && slot.slotIndex == slotIndex) {
+            return index;
+        }
+    }
+    return qBound(0, slotIndex, qMax(0, portSlots.size() - 1));
 }
 
 std::optional<PortSlotHit> NodeGraphicsItem::slotAt(const QPointF& scenePos, qreal hitRadius, bool inputSide) const

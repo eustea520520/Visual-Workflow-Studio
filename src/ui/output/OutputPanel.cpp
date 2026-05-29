@@ -13,6 +13,7 @@
 #include <QAbstractItemView>
 #include <QFrame>
 #include <QPlainTextEdit>
+#include <QSet>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTabWidget>
@@ -83,6 +84,7 @@ void OutputPanel::clearRun()
     m_debugOutputView->clear();
     m_stderrView->clear();
     m_tracebackView->clear();
+    m_liveDebugOutputNodeIds.clear();
 }
 
 void OutputPanel::recordWorkflowStatus(const QString& runId, const QString& status)
@@ -117,6 +119,23 @@ void OutputPanel::recordNodeOutput(const QString& runId, const QString& nodeId, 
 
     const auto row = ensureNodeRunRow(nodeId);
     setCell(m_nodeRunTable, row, 4, compactJson(outputs));
+}
+
+void OutputPanel::recordNodeDebugOutput(const QString& runId, const QString& nodeId, const QString& text)
+{
+    Q_UNUSED(runId);
+
+    if (text.trimmed().isEmpty()) {
+        return;
+    }
+
+    m_liveDebugOutputNodeIds.insert(nodeId);
+    appendDebugOutput(QString("[%1]\n%2").arg(displayNodeName(nodeId), text));
+
+    if (m_advancedDiagnosticsEnabled) {
+        const auto row = ensureNodeRunRow(nodeId);
+        setCell(m_nodeRunTable, row, 3, text.left(300));
+    }
 }
 
 void OutputPanel::recordNodeError(const QString& runId, const QString& nodeId, const QString& message)
@@ -155,6 +174,15 @@ void OutputPanel::recordThreadTrace(
 
 void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& result)
 {
+    const bool liveDebugAlreadyDisplayed = !m_liveDebugOutputNodeIds.isEmpty();
+    QSet<QString> debugOutputNodeIds;
+    for (const auto& debugOutput : result.debugOutputs) {
+        if (!debugOutput.text.trimmed().isEmpty()) {
+            debugOutputNodeIds.insert(debugOutput.nodeId);
+        }
+    }
+    debugOutputNodeIds.unite(m_liveDebugOutputNodeIds);
+
     if (m_advancedDiagnosticsEnabled) {
         for (auto it = result.nodeStatuses.cbegin(); it != result.nodeStatuses.cend(); ++it) {
             const auto row = ensureNodeRunRow(it.key());
@@ -174,7 +202,9 @@ void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& 
         }
 
         const auto nodeDisplayName = displayNodeName(nodeId);
-        if (result.debugOutputs.isEmpty() && !nodeResult.stdoutText.trimmed().isEmpty()) {
+        if (!liveDebugAlreadyDisplayed
+            && !debugOutputNodeIds.contains(nodeId)
+            && !nodeResult.stdoutText.trimmed().isEmpty()) {
             appendDebugOutput(QString("[%1]\n%2").arg(nodeDisplayName, nodeResult.stdoutText));
         }
         if (!nodeResult.stderrText.trimmed().isEmpty()) {
@@ -187,7 +217,9 @@ void OutputPanel::showExecutionResult(const execution::WorkflowExecutionResult& 
     }
 
     for (const auto& debugOutput : result.debugOutputs) {
-        if (!debugOutput.text.trimmed().isEmpty()) {
+        if (!liveDebugAlreadyDisplayed
+            && !m_liveDebugOutputNodeIds.contains(debugOutput.nodeId)
+            && !debugOutput.text.trimmed().isEmpty()) {
             appendDebugOutput(QString("[%1]\n%2")
                 .arg(displayNodeName(debugOutput.nodeId), debugOutput.text));
         }
@@ -450,7 +482,12 @@ void OutputPanel::updateAdvancedTabs()
 
 void OutputPanel::addTabIfMissing(QWidget* widget, const QString& title, int index)
 {
-    if (m_tabs == nullptr || widget == nullptr || m_tabs->indexOf(widget) >= 0) {
+    if (m_tabs == nullptr || widget == nullptr) {
+        return;
+    }
+
+    if (m_tabs->indexOf(widget) >= 0) {
+        widget->show();
         return;
     }
 
@@ -459,6 +496,7 @@ void OutputPanel::addTabIfMissing(QWidget* widget, const QString& title, int ind
     } else {
         m_tabs->addTab(widget, title);
     }
+    widget->show();
 }
 
 void OutputPanel::removeTabForWidget(QWidget* widget)
@@ -471,6 +509,7 @@ void OutputPanel::removeTabForWidget(QWidget* widget)
     if (index >= 0) {
         m_tabs->removeTab(index);
     }
+    widget->hide();
 }
 
 void OutputPanel::appendTimelineRow(const QString& runId, const QString& scope, const QString& itemId, const QString& status)

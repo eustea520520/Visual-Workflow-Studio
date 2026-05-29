@@ -20,6 +20,7 @@ public:
     void publishNodeStatusChanged(const QString& runId, const QString& nodeId, NodeStatus status);
     void publishNodeStatusText(const QString& runId, const QString& nodeId, const QString& status);
     void publishNodeOutputReady(const QString& runId, const QString& nodeId, const QJsonObject& outputs);
+    void publishNodeDebugOutputReady(const QString& runId, const QString& nodeId, const QString& text);
     void publishNodeError(const QString& runId, const QString& nodeId, const QString& message);
     void publishThreadTrace(
         const QString& runId,
@@ -33,6 +34,7 @@ signals:
     void workflowStatusChanged(const QString& runId, const QString& status);
     void nodeStatusChanged(const QString& runId, const QString& nodeId, const QString& status);
     void nodeOutputReady(const QString& runId, const QString& nodeId, const QJsonObject& outputs);
+    void nodeDebugOutputReady(const QString& runId, const QString& nodeId, const QString& text);
     void nodeError(const QString& runId, const QString& nodeId, const QString& message);
     void threadTrace(const QString& runId, const QString& nodeId, const QString& phase, const QString& threadId, const QString& threadName);
 };

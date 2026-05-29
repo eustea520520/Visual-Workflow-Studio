@@ -487,6 +487,84 @@ int main(int argc, char* argv[])
         return check;
     }
 
+    vws::domain::Workflow multiPortCanvasWorkflow;
+    multiPortCanvasWorkflow.workflowId = "multi-port-canvas";
+    multiPortCanvasWorkflow.workspaceId = "workspace-test";
+    auto multiPortSourceNode = makeNode("multi-port-source", "Multi Port Source", -160, 0);
+    auto multiPortTargetNode = makeNode("multi-port-target", "Multi Port Target", 180, 0);
+    multiPortTargetNode.inputPorts = {"left", "right"};
+    multiPortTargetNode.ioSpec.inputs.clear();
+    vws::domain::PortDimensionSpec leftInput;
+    leftInput.portName = "left";
+    leftInput.dimension = 1;
+    leftInput.itemLabels = {"left"};
+    vws::domain::PortDimensionSpec rightInput;
+    rightInput.portName = "right";
+    rightInput.dimension = 1;
+    rightInput.itemLabels = {"right"};
+    multiPortTargetNode.ioSpec.inputs = {leftInput, rightInput};
+    multiPortCanvasWorkflow.nodes = {multiPortSourceNode, multiPortTargetNode};
+    canvas.setWorkflow(multiPortCanvasWorkflow);
+    auto* multiPortSource = findNodeItem(canvas.scene(), "multi-port-source");
+    auto* multiPortTarget = findNodeItem(canvas.scene(), "multi-port-target");
+    if (const auto check = expect(multiPortSource != nullptr && multiPortTarget != nullptr,
+            "Multi-port canvas nodes should exist")) {
+        return check;
+    }
+    const auto leftAnchor = multiPortTarget->inputAnchorScenePos("left", 0);
+    const auto rightAnchor = multiPortTarget->inputAnchorScenePos("right", 0);
+    if (const auto check = expect(leftAnchor != rightAnchor,
+            "Different input ports should resolve to different visible anchors even when both use slot 0")) {
+        return check;
+    }
+    const auto rightHit = multiPortTarget->inputSlotAt(rightAnchor, 14.0);
+    if (const auto check = expect(rightHit.has_value()
+            && rightHit->portName == "right"
+            && rightHit->slotIndex == 0,
+            "Hit-testing the second logical input port should preserve its port name")) {
+        return check;
+    }
+
+    const auto multiPortPressPos = canvas.mapFromScene(multiPortSource->outputAnchorScenePos("output", 0));
+    const auto multiPortReleasePos = canvas.mapFromScene(rightAnchor);
+    QMouseEvent multiPortPressEvent(
+        QEvent::MouseButtonPress,
+        QPointF(multiPortPressPos),
+        QPointF(canvas.viewport()->mapToGlobal(multiPortPressPos)),
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &multiPortPressEvent);
+    QMouseEvent multiPortMoveEvent(
+        QEvent::MouseMove,
+        QPointF(multiPortReleasePos),
+        QPointF(canvas.viewport()->mapToGlobal(multiPortReleasePos)),
+        Qt::NoButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &multiPortMoveEvent);
+    QMouseEvent multiPortReleaseEvent(
+        QEvent::MouseButtonRelease,
+        QPointF(multiPortReleasePos),
+        QPointF(canvas.viewport()->mapToGlobal(multiPortReleasePos)),
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    QApplication::sendEvent(canvas.viewport(), &multiPortReleaseEvent);
+    const auto multiPortWorkflow = canvas.workflow();
+    if (const auto check = expect(multiPortWorkflow.edges.size() == 1
+            && multiPortWorkflow.edges.first().toPort == "right"
+            && multiPortWorkflow.edges.first().toSlot == 0,
+            "Dragging to the second logical input port should create an edge to that port, not the first port")) {
+        return check;
+    }
+    auto* multiPortEdge = findFirstEdgeItem(canvas.scene());
+    if (const auto check = expect(multiPortEdge != nullptr
+            && QLineF(multiPortEdge->path().pointAtPercent(1.0), rightAnchor).length() < 2.0,
+            "Rendered edge should terminate at the second logical input port anchor")) {
+        return check;
+    }
+
     vws::ui::WorkflowCanvas connectCanvas;
     vws::domain::Workflow connectWorkflow;
     connectWorkflow.workflowId = "connect-selected-canvas";

@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
@@ -37,6 +38,7 @@ public:
     void recordWorkflowStatus(const QString& runId, const QString& status);
     void recordNodeStatus(const QString& runId, const QString& nodeId, const QString& status);
     void recordNodeOutput(const QString& runId, const QString& nodeId, const QJsonObject& outputs);
+    void recordNodeDebugOutput(const QString& runId, const QString& nodeId, const QString& text);
     void recordNodeError(const QString& runId, const QString& nodeId, const QString& message);
     void recordThreadTrace(
         const QString& runId,
@@ -85,6 +87,7 @@ private:
     PythonCodeEditor* m_tracebackView = nullptr;
     QHash<QString, int> m_nodeRunRows;
     QHash<QString, QString> m_nodeNames;
+    QSet<QString> m_liveDebugOutputNodeIds;
     QString m_workflowName;
     bool m_advancedDiagnosticsEnabled = false;
 };

@@ -1,6 +1,7 @@
 #include "application/PythonCodeTemplates.h"
 #include "application/WorkflowService.h"
 #include "application/subsystem/SubsystemService.h"
+#include "domain/NodeConfigKeys.h"
 #include "execution/ExecutionEngine.h"
 #include "execution/LoopNodeExecutor.h"
 #include "workers/MockNodeWorker.h"
@@ -276,6 +277,8 @@ int main(int argc, char* argv[])
     QStringList nodeStatusEvents;
     QStringList workflowStatusEvents;
     QStringList threadTraceEvents;
+    QStringList liveDebugOutputEvents;
+    QHash<QString, QJsonObject> lastNodeOutputs;
 
     QObject::connect(&fixture.engine.eventBus(),
         &vws::execution::ExecutionEventBus::nodeStatusChanged,
@@ -293,6 +296,16 @@ int main(int argc, char* argv[])
         [&](const QString&, const QString& nodeId, const QString& phase, const QString& threadId, const QString&) {
             threadTraceEvents.append(QString("%1:%2:%3").arg(nodeId, phase, threadId));
         });
+    QObject::connect(&fixture.engine.eventBus(),
+        &vws::execution::ExecutionEventBus::nodeOutputReady,
+        [&](const QString&, const QString& nodeId, const QJsonObject& outputs) {
+            lastNodeOutputs.insert(nodeId, outputs);
+        });
+    QObject::connect(&fixture.engine.eventBus(),
+        &vws::execution::ExecutionEventBus::nodeDebugOutputReady,
+        [&](const QString&, const QString& nodeId, const QString& text) {
+            liveDebugOutputEvents.append(QString("%1:%2").arg(nodeId, text));
+        });
 
     const auto simpleWorkflow = loadWorkflow(fixture.workflowService, "tests/fixtures/simple_workflow.json");
     const auto simpleRun = fixture.engine.runWorkflow(simpleWorkflow);
@@ -304,6 +317,11 @@ int main(int argc, char* argv[])
         return result;
     }
     if (const auto result = expect(simpleRun.nodeStatuses.value("node-a") == "Succeeded", "node-a should succeed")) {
+        return result;
+    }
+    if (const auto result = expect(liveDebugOutputEvents.join("\n").contains("node-a:Mock node succeeded: node-a")
+            && liveDebugOutputEvents.join("\n").contains("node-b:Mock node succeeded: node-b"),
+            "Node debug output events should be published as each node finishes")) {
         return result;
     }
     if (const auto result = expect(simpleRun.nodeStatuses.value("node-b") == "Succeeded", "node-b should succeed")) {
@@ -379,8 +397,94 @@ int main(int argc, char* argv[])
             "Subsystem node should aggregate stdout from internal nodes for output-panel debug display")) {
         return result;
     }
+    if (const auto result = expect(lastNodeOutputs.contains("inner"),
+            "Subsystem child node outputs should be forwarded to the parent run event stream")) {
+        return result;
+    }
+    bool subsystemDebugOutputFound = false;
+    for (const auto& debugOutput : subsystemRun.debugOutputs) {
+        if (debugOutput.nodeId == subsystemNode.nodeId
+            && debugOutput.text.contains("Mock node succeeded: inner")) {
+            subsystemDebugOutputFound = true;
+            break;
+        }
+    }
+    if (const auto result = expect(subsystemDebugOutputFound,
+            "Subsystem node print output should be present in ordered debug output")) {
+        return result;
+    }
     if (const auto result = expect(nodeStatusEvents.contains("inner:Running"),
             "Subsystem child node status should be forwarded to the parent run event stream")) {
+        return result;
+    }
+
+    auto namedInputSubsystemNode = subsystemService.createSubsystemNode("workspace-test", "Named Inputs", subsystemPosition);
+    vws::domain::Workflow namedInputChildWorkflow;
+    namedInputChildWorkflow.workflowId = "named-input-child-workflow";
+    namedInputChildWorkflow.workspaceId = "workspace-test";
+    auto namedInputInner = makeNode("named-input-inner");
+    namedInputInner.inputPorts = {"a", "b"};
+    namedInputInner.ioSpec.inputs.clear();
+    vws::domain::PortDimensionSpec inputA;
+    inputA.portName = "a";
+    inputA.dimension = 1;
+    inputA.itemLabels = {"a"};
+    vws::domain::PortDimensionSpec inputB;
+    inputB.portName = "b";
+    inputB.dimension = 1;
+    inputB.itemLabels = {"b"};
+    namedInputInner.ioSpec.inputs = {inputA, inputB};
+    namedInputChildWorkflow.nodes = {namedInputInner};
+    if (!subsystemService.saveSubsystemWorkflow(namedInputSubsystemNode, namedInputChildWorkflow, &subsystemError)) {
+        return fail(subsystemError);
+    }
+    const auto namedBoundary = vws::application::SubsystemBoundary::fromJson(
+        namedInputSubsystemNode.config.value(vws::domain::NodeConfigKeys::SubsystemBoundary).toObject());
+    QString externalA;
+    QString externalB;
+    QString externalOutput;
+    for (const auto& port : namedBoundary.inputs) {
+        if (port.internalPort == "a") {
+            externalA = port.externalPort;
+        } else if (port.internalPort == "b") {
+            externalB = port.externalPort;
+        }
+    }
+    if (!namedBoundary.outputs.isEmpty()) {
+        externalOutput = namedBoundary.outputs.first().externalPort;
+    }
+    if (const auto result = expect(!externalA.isEmpty() && !externalB.isEmpty() && !externalOutput.isEmpty(),
+            "Named input subsystem test should expose a, b, and output boundary ports")) {
+        return result;
+    }
+    vws::domain::Workflow namedInputParentWorkflow;
+    namedInputParentWorkflow.workflowId = "named-input-subsystem-parent";
+    namedInputParentWorkflow.workspaceId = "workspace-test";
+    auto sourceA = makeNode("source-a", "starter");
+    sourceA.config.insert("mock_output", QJsonObject{{"value", "A"}});
+    auto sourceB = makeNode("source-b", "starter");
+    sourceB.config.insert("mock_output", QJsonObject{{"value", "B"}});
+    auto namedInputSink = makeNode("named-input-sink");
+    namedInputParentWorkflow.nodes = {sourceA, sourceB, namedInputSubsystemNode, namedInputSink};
+    auto edgeA = makeEdge("edge-source-a-subsystem", "source-a", namedInputSubsystemNode.nodeId);
+    edgeA.toPort = externalA;
+    auto edgeB = makeEdge("edge-source-b-subsystem", "source-b", namedInputSubsystemNode.nodeId);
+    edgeB.toPort = externalB;
+    auto namedOutputEdge = makeEdge("edge-named-subsystem-sink", namedInputSubsystemNode.nodeId, "named-input-sink");
+    namedOutputEdge.fromPort = externalOutput;
+    namedInputParentWorkflow.edges = {edgeA, edgeB, namedOutputEdge};
+    const auto namedInputRun = fixture.engine.runWorkflow(namedInputParentWorkflow);
+    if (const auto result = expect(namedInputRun.success,
+            QString("Named-input Subsystem node should execute successfully: %1")
+                .arg(namedInputRun.errors.join("; ")))) {
+        return result;
+    }
+    const auto namedSubsystemOutput = namedInputRun.nodeResults.value(namedInputSubsystemNode.nodeId)
+        .outputs.value(externalOutput).toObject();
+    const auto namedInputs = namedSubsystemOutput.value("inputs").toObject();
+    if (const auto result = expect(namedInputs.value("a").toArray().first().toObject().value("value").toString() == "A"
+            && namedInputs.value("b").toArray().first().toObject().value("value").toString() == "B",
+            "Subsystem runtime mapping should preserve named input ports instead of swapping a and b")) {
         return result;
     }
 
@@ -501,6 +605,11 @@ int main(int argc, char* argv[])
         if (const auto result = expect(defaultPythonLoopRun.nodeStatuses.value("python-loop") == "Succeeded"
                 && defaultPythonLoopRun.nodeStatuses.value("python-body") == "Succeeded",
                 "Default Python Loop and its body should both reach terminal success")) {
+            return result;
+        }
+        if (const auto result = expect(!defaultPythonLoopRun.nodeResults.value("python-loop")
+                    .outputs.value("output").toArray().isEmpty(),
+                "Default Python Loop node should expose its Python outputs")) {
             return result;
         }
     }
@@ -645,6 +754,18 @@ int main(int argc, char* argv[])
     const auto bodyMetadata = loopRun.nodeResults.value("loop-body").metadata.value("loop_summary").toObject();
     if (const auto result = expect(loopMetadata.value("iteration_count").toInt() == 3,
             "Loop node should report three completed iterations in metadata")) {
+        return result;
+    }
+    const auto loopOutputs = loopRun.nodeResults.value("loop").outputs.value("output").toArray();
+    if (const auto result = expect(!loopOutputs.isEmpty()
+            && loopOutputs.first().toObject().value("iter").toInt() == 3,
+            "Loop node result should preserve the final Loop Python output")) {
+        return result;
+    }
+    const auto liveLoopOutputs = lastNodeOutputs.value("loop").value("output").toArray();
+    if (const auto result = expect(!liveLoopOutputs.isEmpty()
+            && liveLoopOutputs.first().toObject().value("iter").toInt() == 3,
+            "Loop node output-ready event should publish the final Loop Python output")) {
         return result;
     }
     if (const auto result = expect(bodyMetadata.value("history").toArray().size() == 3,
@@ -821,6 +942,7 @@ int main(int argc, char* argv[])
                 return result;
             },
             {},
+            {},
             {});
         if (const auto result = expect(loopExecution.success,
                 "LoopNodeExecutor should not crash when defensively handling a negative source slot")) {
@@ -859,6 +981,7 @@ int main(int argc, char* argv[])
                 result.outputs = {{"output", QJsonArray{request.inputs}}};
                 return result;
             },
+            {},
             {},
             {});
         if (const auto result = expect(negativeTargetLoopExecution.success,

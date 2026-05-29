@@ -47,6 +47,8 @@ public:
     QPointF outputAnchorScenePos() const;
     QPointF inputAnchorScenePos(int slotIndex) const;
     QPointF outputAnchorScenePos(int slotIndex) const;
+    QPointF inputAnchorScenePos(const QString& portName, int slotIndex) const;
+    QPointF outputAnchorScenePos(const QString& portName, int slotIndex) const;
     QPointF inputSlotAnchorScenePos(int slotIndex) const;
     QPointF outputSlotAnchorScenePos(int slotIndex) const;
     std::optional<PortSlotHit> inputSlotAt(const QPointF& scenePos, qreal hitRadius) const;
@@ -88,6 +90,8 @@ private:
     QPointF inputAnchorLocalPos() const;
     QPointF outputAnchorLocalPos() const;
     QPointF slotAnchorLocalPos(bool inputSide, int slotIndex) const;
+    QPointF slotAnchorLocalPos(bool inputSide, const QString& portName, int slotIndex) const;
+    int visualSlotIndex(bool inputSide, const QString& portName, int slotIndex) const;
     std::optional<PortSlotHit> slotAt(const QPointF& scenePos, qreal hitRadius, bool inputSide) const;
     void paintPortSlots(QPainter* painter, bool inputSide) const;
     void paintResizeHandles(QPainter* painter) const;

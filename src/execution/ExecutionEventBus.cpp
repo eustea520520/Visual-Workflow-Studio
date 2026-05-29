@@ -27,6 +27,11 @@ void ExecutionEventBus::publishNodeOutputReady(const QString& runId, const QStri
     emit nodeOutputReady(runId, nodeId, outputs);
 }
 
+void ExecutionEventBus::publishNodeDebugOutputReady(const QString& runId, const QString& nodeId, const QString& text)
+{
+    emit nodeDebugOutputReady(runId, nodeId, text);
+}
+
 void ExecutionEventBus::publishNodeError(const QString& runId, const QString& nodeId, const QString& message)
 {
     emit nodeError(runId, nodeId, message);

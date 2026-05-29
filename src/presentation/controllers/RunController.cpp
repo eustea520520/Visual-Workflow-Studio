@@ -41,6 +41,13 @@ RunController::RunController(
             emit nodeOutputReady(runId, workflowId, nodeId, outputs);
         });
 
+    connect(&m_executionEngine.eventBus(), &execution::ExecutionEventBus::nodeDebugOutputReady, this,
+        [this](const QString& runId, const QString& nodeId, const QString& text) {
+            const auto workflowId = workflowIdForRun(runId);
+            m_store.rememberRunWorkflow(runId, workflowId);
+            emit nodeDebugOutputReady(runId, workflowId, nodeId, text);
+        });
+
     connect(&m_executionEngine.eventBus(), &execution::ExecutionEventBus::nodeError, this,
         [this](const QString& runId, const QString& nodeId, const QString& message) {
             const auto workflowId = workflowIdForRun(runId);
